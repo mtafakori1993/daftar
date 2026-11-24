@@ -50,8 +50,8 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog commandline
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed=x64
+ArchitecturesInstallIn64BitMode=x64
 DisableDirPage=no
 DirExistsWarning=no
 
