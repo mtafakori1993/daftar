@@ -189,6 +189,19 @@ impl Palette {
     }
 
     pub fn reader_theme(&self, theme: &daftar_core::settings::ReadingTheme) -> ReaderColors {
+        // Built-in presets follow the interface mode (light/dark) so the reader can never
+        // end up with near-black text on a dark canvas, or light text on a light one.
+        // Custom themes are honoured exactly as the user defined them.
+        let theme = if theme.builtin && theme.dark != self.dark {
+            if self.dark {
+                daftar_core::settings::ReadingTheme::dark_default()
+            } else {
+                daftar_core::settings::ReadingTheme::light_default()
+            }
+        } else {
+            theme.clone()
+        };
+        let theme = &theme;
         let parse = |hex: &str, fallback: Color32| {
             daftar_core::settings::ReadingTheme::parse_color(hex)
                 .map(|[r, g, b]| Color32::from_rgb(r, g, b))

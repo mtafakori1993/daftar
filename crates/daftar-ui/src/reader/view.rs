@@ -408,7 +408,6 @@ impl ReaderState {
         store: &Store,
         library_root: &Path,
     ) -> Vec<ReaderAction> {
-        log::info!("DBG reader show layer={:?}", ui.layer_id());
         let mut actions = Vec::new();
         self.library_root = Some(library_root.to_path_buf());
         let colors = palette.reader_theme(&settings.theme());
@@ -511,6 +510,10 @@ impl ReaderState {
 
         self.viewport_height = ui.available_height().max(200.0);
         let content_width = ui.available_width().max(320.0);
+        // The document is a page with its own colours: paint the reading background so a
+        // light/custom theme stays legible even while the surrounding interface is dark.
+        ui.painter()
+            .rect_filled(ui.available_rect_before_wrap(), 0.0, colors.background);
         let offset = self.pending_scroll.take().unwrap_or(self.scroll_offset);
         let mut open_diagram: Option<u64> = None;
         let mut context_screen_pos: Option<Pos2> = None;
@@ -533,6 +536,11 @@ impl ReaderState {
                 let origin = content_rect.min;
                 let layout = &self.layout;
                 let colors_ref = &colors;
+                // Floating reader UIs (selection toolbar, highlight menu) live in a higher layer.
+                // Only treat a press as document interaction when the document itself is hovered,
+                // otherwise clicks on those controls would re-anchor the selection and destroy
+                // the very widget being clicked.
+                let doc_hovered = response.hovered();
 
                 // ---- pointer interaction ----
                 let pointer = ui.ctx().pointer_interact_pos();
@@ -540,7 +548,7 @@ impl ReaderState {
                 let double_click = ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary));
                 let released = ui.input(|i| i.pointer.any_released());
                 let shift = ui.input(|i| i.modifiers.shift);
-                if pressed {
+                if pressed && doc_hovered {
                     if let Some(pos) = pointer {
                         if content_rect.contains(pos) {
                             if let Some((element_idx, source_offset)) =
@@ -572,7 +580,9 @@ impl ReaderState {
                         }
                     }
                 }
-                if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary)) {
+                if doc_hovered
+                    && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary))
+                {
                     if let Some(pos) = pointer {
                         if content_rect.contains(pos) {
                             if let Some((_idx, offset)) = hit_test(layout, pos, origin) {
@@ -1651,14 +1661,6 @@ impl ReaderState {
         let mut copy = false;
         let mut remove = false;
         let mut dismiss = false;
-        log::info!(
-            "DBG menu open pos={:?} fresh={} pointer={:?} layer_at={:?} area_layer={:?}",
-            menu.pos,
-            fresh,
-            ctx.input(|i| i.pointer.interact_pos()),
-            ctx.input(|i| i.pointer.interact_pos()).map(|p| ctx.layer_id_at(p)),
-            Id::new("highlight-menu")
-        );
 
         let menu_rect = egui::Area::new(Id::new("highlight-menu"))
             .order(Order::Foreground)
@@ -1676,22 +1678,30 @@ impl ReaderState {
                         color: palette.shadow,
                     })
                     .show(ui, |ui| {
-                        ui.set_max_width(210.0);
+                        ui.set_max_width(230.0);
                         ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
                             for color in colors.highlight_palette.iter().take(5) {
                                 let (rect, response) =
-                                    ui.allocate_exact_size(Vec2::splat(22.0), Sense::click());
-                                ui.painter().circle_filled(rect.center(), 7.0, *color);
+                                    ui.allocate_exact_size(Vec2::splat(30.0), Sense::click());
+                                let hovered = response.hovered();
+                                if hovered {
+                                    ui.painter().circle_filled(
+                                        rect.center(),
+                                        13.0,
+                                        palette.accent_subtle,
+                                    );
+                                }
+                                ui.painter().circle_filled(rect.center(), if hovered { 9.5 } else { 8.0 }, *color);
                                 ui.painter().circle_stroke(
                                     rect.center(),
-                                    7.0,
+                                    if hovered { 9.5 } else { 8.0 },
                                     Stroke::new(1.0, palette.border_strong),
                                 );
-                                log::info!("DBG swatch {:?} hovered={} clicked={}", color, response.hovered(), response.clicked());
                                 if response.clicked() {
                                     recolor = Some(*color);
                                 }
-                                if response.hovered() {
+                                if hovered {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                 }
                             }
@@ -1707,14 +1717,10 @@ impl ReaderState {
                         {
                             add_note = true;
                         }
-                        let copy_r = ui.button(crate::i18n::t("Copy quote"));
-                        log::info!("DBG copy btn hovered={} clicked={}", copy_r.hovered(), copy_r.clicked());
-                        if copy_r.clicked() {
+                        if ui.button(crate::i18n::t("Copy quote")).clicked() {
                             copy = true;
                         }
-                        let remove_r = ui.button(crate::i18n::t("Remove highlight"));
-                        log::info!("DBG remove btn hovered={} clicked={}", remove_r.hovered(), remove_r.clicked());
-                        if remove_r.clicked() {
+                        if ui.button(crate::i18n::t("Remove highlight")).clicked() {
                             remove = true;
                         }
                     })
@@ -1723,12 +1729,14 @@ impl ReaderState {
             })
             .inner;
 
-        log::info!("DBG actions recolor={:?} note={} copy={} remove={} menu_rect={:?}", recolor, add_note, copy, remove, menu_rect);
         if let Some(color) = recolor {
             let highlight = &mut self.highlights[index];
             highlight.color = hex_of(color);
-            if store.upsert_highlight(highlight).is_ok() {
+            let saved = store.upsert_highlight(highlight);
+            if saved.is_ok() {
                 actions.push(ReaderAction::Notice(crate::i18n::t("Highlight color updated.").into(), ToastKind::Success));
+            } else {
+                actions.push(ReaderAction::Notice(crate::i18n::t("Could not save the highlight.").into(), ToastKind::Error));
             }
             dismiss = true;
         } else if add_note {
@@ -1748,9 +1756,15 @@ impl ReaderState {
             dismiss = true;
         } else if remove {
             let id = self.highlights[index].id.clone();
-            let _ = store.delete_highlight(&id);
-            self.highlights.retain(|h| h.id != id);
-            actions.push(ReaderAction::Notice(crate::i18n::t("Highlight removed.").into(), ToastKind::Info));
+            match store.delete_highlight(&id) {
+                Ok(()) => {
+                    self.highlights.retain(|h| h.id != id);
+                    actions.push(ReaderAction::Notice(crate::i18n::t("Highlight removed.").into(), ToastKind::Info));
+                }
+                Err(_) => {
+                    actions.push(ReaderAction::Notice(crate::i18n::t("Could not remove the highlight.").into(), ToastKind::Error));
+                }
+            }
             dismiss = true;
         } else if !fresh {
             if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {

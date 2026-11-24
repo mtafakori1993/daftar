@@ -450,6 +450,7 @@ const FA: &[(&str, &str)] = &[
     ("Import a font file", "درونریزی فایل قلم"),
     ("Export library as ZIP", "برونریزی کتابخانه بهصورت ZIP"),
     ("Import Daftar library ZIP", "درونریزی ZIP کتابخانهٔ دفتر"),
+    ("Could not remove the highlight.", "حذف برجسته ممکن نشد."),
     ("{} selected", "{} انتخابشده"),
     ("{} words · {} min read", "{} واژه · {} دقیقه مطالعه"),
 ];

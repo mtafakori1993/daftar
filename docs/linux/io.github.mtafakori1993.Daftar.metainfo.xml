@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Daftar contributors -->
+<component type="desktop-application">
+  <id>io.github.mtafakori1993.Daftar</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Daftar</name>
+  <summary>The World's Best Markdown Reader</summary>
+  <summary xml:lang="fa">بهترین Markdown Reader جهان</summary>
+  <description>
+    <p>
+      Daftar is a native Rust desktop Markdown reader and knowledge studio. It renders
+      Markdown with first-class right-to-left support for Persian and Arabic, Mermaid
+      diagrams, syntax-highlighted code, footnotes and tables, and keeps a searchable
+      library of highlights, bookmarks, flashcards and study roadmaps.
+    </p>
+    <p>No JavaScript, WebView, Electron or Tauri: a single compiled binary.</p>
+    <ul>
+      <li>Persian/Arabic shaping, Unicode bidi and automatic direction detection</li>
+      <li>Mermaid subset rendering with pan, zoom and PNG export</li>
+      <li>SQLite/FTS5 library with full-text search</li>
+      <li>PDF and PNG export with embedded fonts</li>
+      <li>English and Persian interface</li>
+      <li>Portable mode: run from a USB drive</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">daftar.desktop</launchable>
+  <url type="homepage">https://github.com/mtafakori1993/daftar</url>
+  <url type="bugtracker">https://github.com/mtafakori1993/daftar/issues</url>
+  <developer id="io.github.mtafakori1993">
+    <name>Daftar contributors</name>
+  </developer>
+  <categories>
+    <category>Office</category>
+    <category>Utility</category>
+  </categories>
+  <keywords>
+    <keyword>markdown</keyword>
+    <keyword>notes</keyword>
+    <keyword>reader</keyword>
+    <keyword>persian</keyword>
+  </keywords>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-24">
+      <description>
+        <p>First public release: native Markdown reader with RTL support, diagrams,
+        knowledge library, exports, English/Persian UI and portable mode.</p>
+      </description>
+    </release>
+  </releases>
+</component>

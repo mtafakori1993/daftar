@@ -1,0 +1,258 @@
+name: Release
+
+# Publishes a GitHub Release for every version tag:
+#   * Linux artifacts on ubuntu-22.04 (portable tar.gz/zip, DEB, AppImage)
+#   * Windows artifacts on windows-latest (portable zip, Inno Setup installer, optional MSI)
+# The release is only published when both platform builds and all quality gates succeed.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Least privilege: the reusable jobs get read-only access, publishing asks for write.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    name: Quality gates
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev \
+            libgl1-mesa-dev libxkbcommon-dev libwayland-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libfontconfig1-dev desktop-file-utils appstream
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-linux
+
+      - name: Verify version consistency
+        run: |
+          VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "Cargo.toml=$VERSION tag=$TAG"
+          test "$VERSION" = "$TAG" || { echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $VERSION"; exit 1; }
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+
+      - name: rustfmt (informational)
+        continue-on-error: true
+        run: cargo fmt --all -- --check
+
+  linux:
+    name: Build Linux artifacts
+    needs: quality
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev fakeroot dpkg-dev zip \
+            libgl1-mesa-dev libxkbcommon-dev libwayland-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libfontconfig1-dev file desktop-file-utils appstream fuse libfuse2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-linux
+
+      - name: Build and package (tar.gz, portable zip, DEB, AppImage)
+        run: scripts/package-linux.sh --no-tests --no-clippy --require-appimage
+
+      - name: Verify artifacts
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
+          for f in \
+            "dist/daftar-${VERSION}-linux-x86_64.tar.gz" \
+            "dist/daftar-${VERSION}-linux-x86_64-portable.zip" \
+            "dist/daftar_${VERSION}_amd64.deb" \
+            "dist/daftar-${VERSION}-linux-x86_64.AppImage" \
+            "dist/SHA256SUMS"; do
+            test -s "$f" || { echo "::error::missing artifact $f"; exit 1; }
+          done
+          (cd dist && sha256sum -c SHA256SUMS)
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            dist/daftar-*-linux-x86_64.tar.gz
+            dist/daftar-*-linux-x86_64-portable.zip
+            dist/daftar_*_amd64.deb
+            dist/daftar-*-linux-x86_64.AppImage
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Build Windows artifacts
+    needs: quality
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-windows
+
+      - name: Inno Setup
+        run: |
+          choco install innosetup --no-progress -y
+          echo "C:\Program Files (x86)\Inno Setup 6" >> $env:GITHUB_PATH
+
+      - name: Build and package (portable zip, installer)
+        shell: pwsh
+        run: scripts/package-windows.ps1 -NoTests -NoClippy
+
+      - name: Verify artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $required = @(
+            "dist/daftar-$version-windows-x86_64-portable.zip",
+            "dist/daftar-$version-windows-x86_64-setup.exe",
+            "dist/SHA256SUMS"
+          )
+          foreach ($f in $required) {
+            if (-not (Test-Path $f) -or (Get-Item $f).Length -eq 0) { throw "missing artifact: $f" }
+          }
+          Push-Location dist
+          try {
+            foreach ($line in Get-Content SHA256SUMS) {
+              if (-not $line.Trim()) { continue }
+              $parts = $line -split '\s+', 2
+              $actual = (Get-FileHash -Algorithm SHA256 $parts[1].Trim()).Hash.ToLower()
+              if ($actual -ne $parts[0].Trim()) { throw "checksum mismatch for $($parts[1])" }
+            }
+          } finally { Pop-Location }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            dist/daftar-*-windows-x86_64-portable.zip
+            dist/daftar-*-windows-x86_64-setup.exe
+            dist/daftar-*-windows-x86_64.msi
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect artifacts and verify completeness
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find artifacts -type f ! -name SHA256SUMS -exec cp {} release/ \;
+          VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
+          TAG="v${VERSION}"
+          test "${GITHUB_REF_NAME}" = "${TAG}" || { echo "::error::tag ${GITHUB_REF_NAME} != ${TAG}"; exit 1; }
+          required=(
+            "daftar-${VERSION}-linux-x86_64.tar.gz"
+            "daftar-${VERSION}-linux-x86_64-portable.zip"
+            "daftar_${VERSION}_amd64.deb"
+            "daftar-${VERSION}-linux-x86_64.AppImage"
+            "daftar-${VERSION}-windows-x86_64-portable.zip"
+            "daftar-${VERSION}-windows-x86_64-setup.exe"
+          )
+          for f in "${required[@]}"; do
+            test -s "release/$f" || { echo "::error::required artifact missing from the release: $f"; exit 1; }
+          done
+          ls -lh release
+
+      - name: Generate combined SHA256SUMS
+        run: |
+          set -euo pipefail
+          cd release
+          rm -f SHA256SUMS
+          sha256sum daftar-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Generate release notes
+        run: |
+          VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
+          scripts/release-notes.sh --version "${VERSION}" --tag "${GITHUB_REF_NAME}" \
+            --artifacts release --out release-notes.md
+          cat release-notes.md
+
+      - name: Check that the release does not exist yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "::error::release ${GITHUB_REF_NAME} already exists; refusing to overwrite"
+            exit 1
+          fi
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "Daftar ${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            --verify-tag \
+            release/*
+          gh release view "${GITHUB_REF_NAME}" --json url,assets \
+            --template '{{.url}}{{"\n"}}{{range .assets}}{{.name}}{{"\n"}}{{end}}'

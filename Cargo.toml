@@ -27,7 +27,7 @@ daftar-store = { path = "crates/daftar-store" }
 daftar-export = { path = "crates/daftar-export" }
 daftar-ui = { path = "crates/daftar-ui" }
 
-eframe = { version = "0.37", default-features = false, features = ["glow", "wayland", "x11", "default_fonts"] }
+eframe = { version = "0.37", default-features = false, features = ["glow", "wayland", "x11", "default_fonts", "clipboard"] }
 egui = "0.37"
 egui_extras = { version = "0.37", default-features = false }
 

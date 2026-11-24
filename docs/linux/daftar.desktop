@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Daftar
+GenericName=Markdown Reader
+Comment=The World's Best Markdown Reader
+Comment[fa]=بهترین Markdown Reader جهان
+Exec=daftar %U
+Icon=daftar
+Terminal=false
+Categories=Utility;TextEditor;
+Keywords=markdown;md;notes;reader;reader;knowledge;rtl;persian;
+Keywords[fa]=مارکداون;یادداشت;خواننده;دانش;فارسی;
+StartupNotify=true
+StartupWMClass=daftar
+MimeType=text/markdown;text/x-markdown;
+Actions=NewWindow;
+
+[Desktop Action NewWindow]
+Name=New Window
+Name[fa]=پنجرهٔ جدید
+Exec=daftar

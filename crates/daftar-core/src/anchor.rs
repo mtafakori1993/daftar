@@ -161,7 +161,7 @@ pub fn relocate_anchor(source: &str, anchor: &TextAnchor) -> AnchorStatus {
     while end > start && !source.is_char_boundary(end) {
         end -= 1;
     }
-    while start < source.len() && !source.is_char_boundary(start) {
+    if start < source.len() && !source.is_char_boundary(start) {
         // Move forward to the next char boundary.
         let next = source[start..]
             .chars()
@@ -175,7 +175,6 @@ pub fn relocate_anchor(source: &str, anchor: &TextAnchor) -> AnchorStatus {
                 confidence: score.max(0.05),
             };
         }
-        break;
     }
     // Trim surrounding whitespace introduced by normalization.
     let mut s = start;

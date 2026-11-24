@@ -54,7 +54,7 @@ pub fn plain_text(markdown: &str) -> String {
         while let Some(c) = chars.next() {
             match c {
                 '#' | '>' | '*' | '_' | '`' | '~' if at_line_start => {}
-                '#' | '*' | '_' | '`' => {}
+                '#' | '*' | '_' | '`' | '~' => {}
                 '[' => {}
                 ']' => {
                     if chars.peek() == Some(&'(') {
@@ -417,7 +417,7 @@ fn sub_script_text(text: &str) -> String {
 
 #[cfg(test)]
 mod tex_tests {
-    use super::tex_to_unicode;
+    use super::{plain_text, tex_to_unicode};
 
     #[test]
     fn converts_greek_and_scripts() {
@@ -439,5 +439,11 @@ mod tex_tests {
     #[test]
     fn leaves_plain_text_legible() {
         assert_eq!(tex_to_unicode("E = mc^2"), "E = mc²");
+    }
+
+    #[test]
+    fn plain_text_strips_inline_markers() {
+        assert_eq!(plain_text("**bold**, *italic*, ~~gone~~, `code`"), "bold, italic, gone, code");
+        assert_eq!(plain_text("see [docs](https://example.com)"), "see docs");
     }
 }
