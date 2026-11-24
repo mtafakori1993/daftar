@@ -1,0 +1,22 @@
+[package]
+name = "daftar-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Bidirectional text shaping, font management, layout and rasterisation for Daftar"
+
+[dependencies]
+daftar-core = { workspace = true }
+cosmic-text = { workspace = true }
+fontdb = { workspace = true }
+egui = { workspace = true }
+rustybuzz = { workspace = true }
+ttf-parser = { workspace = true }
+unicode-bidi = { workspace = true }
+unicode-script = { workspace = true }
+unicode-segmentation = { workspace = true }
+tiny-skia = { workspace = true }
+serde = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,38 @@
+[package]
+name = "daftar-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Native egui interface, Spectrum-inspired design system and application views for Daftar"
+
+[dependencies]
+daftar-core = { workspace = true }
+daftar-text = { workspace = true }
+daftar-diagram = { workspace = true }
+daftar-store = { workspace = true }
+daftar-export = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true }
+syntect = { workspace = true }
+tiny-skia = { workspace = true }
+resvg = { workspace = true }
+image = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+notify = { workspace = true }
+rayon = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+sha2 = { workspace = true }
+walkdir = { workspace = true }
+unicode-bidi = { workspace = true }
+unicode-script = { workspace = true }
+unicode-segmentation = { workspace = true }
+fontdb = { workspace = true }
+rand = "0.8"
+[dev-dependencies]
+tempfile = { workspace = true }

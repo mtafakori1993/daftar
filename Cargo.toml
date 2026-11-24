@@ -1,0 +1,86 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/daftar-core",
+    "crates/daftar-text",
+    "crates/daftar-diagram",
+    "crates/daftar-store",
+    "crates/daftar-export",
+    "crates/daftar-ui",
+    "crates/daftar-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+authors = ["Daftar contributors"]
+repository = "https://example.invalid/daftar"
+description = "A native Rust Markdown reader and knowledge studio"
+
+[workspace.dependencies]
+daftar-core = { path = "crates/daftar-core" }
+daftar-text = { path = "crates/daftar-text" }
+daftar-diagram = { path = "crates/daftar-diagram" }
+daftar-store = { path = "crates/daftar-store" }
+daftar-export = { path = "crates/daftar-export" }
+daftar-ui = { path = "crates/daftar-ui" }
+
+eframe = { version = "0.37", default-features = false, features = ["glow", "wayland", "x11", "default_fonts"] }
+egui = "0.37"
+egui_extras = { version = "0.37", default-features = false }
+
+pulldown-cmark = { version = "0.13", default-features = false, features = ["simd"] }
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
+
+rusqlite = { version = "0.43", features = ["bundled", "backup", "functions", "wal"] }
+
+cosmic-text = "0.19"
+fontdb = { version = "0.23", features = ["memmap", "fontconfig"] }
+rustybuzz = "0.20"
+ttf-parser = { version = "0.25", features = ["glyph-names", "opentype-layout", "std"] }
+unicode-bidi = "0.3"
+unicode-script = "0.5"
+unicode-segmentation = "1"
+
+tiny-skia = "0.12"
+resvg = { version = "0.50", default-features = false, features = ["raster-images", "text", "system-fonts"] }
+
+pdf-writer = "0.15"
+subsetter = "0.2"
+
+zip = { version = "9.8", default-features = false, features = ["deflate", "time"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+notify = "9"
+rayon = "1"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde", "clock"] }
+toml = "0.8"
+uuid = { version = "1", features = ["v4", "serde"] }
+indexmap = { version = "2", features = ["serde"] }
+walkdir = "2"
+sha2 = "0.10"
+base64 = "0.22"
+bitflags = "2"
+smallvec = "1"
+
+anyhow = "1"
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.dev]
+opt-level = 1

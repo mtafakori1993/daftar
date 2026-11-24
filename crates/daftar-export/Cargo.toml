@@ -1,0 +1,37 @@
+[package]
+name = "daftar-export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "PNG, PDF and ZIP archive export/import for Daftar"
+
+[dependencies]
+daftar-core = { workspace = true }
+daftar-text = { workspace = true }
+daftar-diagram = { workspace = true }
+daftar-store = { workspace = true }
+rusqlite = { workspace = true }
+tiny-skia = { workspace = true }
+resvg = { workspace = true }
+pdf-writer = { workspace = true }
+subsetter = { workspace = true }
+ttf-parser = { workspace = true }
+rustybuzz = { workspace = true }
+fontdb = { workspace = true }
+image = { workspace = true }
+zip = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+walkdir = { workspace = true }
+sha2 = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+tempfile = { workspace = true }
+unicode-bidi = { workspace = true }
+
+[dev-dependencies]
+lopdf = "0.47"

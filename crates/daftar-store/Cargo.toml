@@ -1,0 +1,21 @@
+[package]
+name = "daftar-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "SQLite persistence, migrations, full-text search and backups for Daftar"
+
+[dependencies]
+daftar-core = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+sha2 = { workspace = true }
+walkdir = { workspace = true }
+tempfile = { workspace = true }

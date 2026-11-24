@@ -1,0 +1,19 @@
+[package]
+name = "daftar-diagram"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Native Mermaid-compatible diagram parsing, layout and rendering for Daftar"
+
+[dependencies]
+daftar-core = { workspace = true }
+daftar-text = { workspace = true }
+tiny-skia = { workspace = true }
+fontdb = { workspace = true }
+ttf-parser = { workspace = true }
+rustybuzz = { workspace = true }
+serde = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }

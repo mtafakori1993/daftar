@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="260" viewBox="0 0 720 260">
+  <rect width="720" height="260" rx="14" fill="#F8F8F8"/>
+  <rect x="24" y="76" width="150" height="86" rx="10" fill="#FFFFFF" stroke="#C6C6C6"/>
+  <text x="99" y="124" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#2C2C2C">Markdown</text>
+  <rect x="285" y="76" width="150" height="86" rx="10" fill="#FFFFFF" stroke="#C6C6C6"/>
+  <text x="360" y="124" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#2C2C2C">Rust core</text>
+  <rect x="546" y="76" width="150" height="86" rx="10" fill="#FFFFFF" stroke="#C6C6C6"/>
+  <text x="621" y="124" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#2C2C2C">SQLite</text>
+  <line x1="174" y1="119" x2="285" y2="119" stroke="#2680EB" stroke-width="3"/>
+  <line x1="435" y1="119" x2="546" y2="119" stroke="#2680EB" stroke-width="3"/>
+  <circle cx="229" cy="119" r="4" fill="#2680EB"/>
+  <circle cx="490" cy="119" r="4" fill="#2680EB"/>
+  <text x="360" y="42" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#1F1F1F">Daftar: files stay files, metadata stays relational</text>
+  <text x="360" y="214" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#6E6E6E">Native Rust · no JavaScript · portable</text>
+</svg>
