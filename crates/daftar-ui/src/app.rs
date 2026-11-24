@@ -1329,6 +1329,28 @@ impl DaftarApp {
                         );
                     }
                 }
+                ReaderAction::SetReadingWidth { preset, width } => {
+                    if let Some(reader) = &mut self.reader {
+                        reader.doc.reading_width_preset = preset;
+                        reader.doc.reading_width = width;
+                        let _ = self
+                            .store
+                            .set_document_reading_width(&reader.doc.id, preset, width);
+                        let id = reader.doc.id.clone();
+                        // Keep the library list in sync with the per-document override.
+                        if let Some(doc) = self.docs.iter_mut().find(|doc| doc.id == id) {
+                            doc.reading_width_preset = preset;
+                            doc.reading_width = width;
+                        }
+                        reader.update_layout(
+                            &mut self.engine,
+                            &self.code,
+                            &Palette::new(self.dark),
+                            &self.settings,
+                            self.last_central_size.x - 60.0,
+                        );
+                    }
+                }
                 ReaderAction::ChangeFontSize(delta) => self.adjust_font_size(delta),
                 ReaderAction::ToggleTheme => self.toggle_theme(ctx),
                 ReaderAction::ToggleRightPanel => {

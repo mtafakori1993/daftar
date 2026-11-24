@@ -8,7 +8,7 @@ use daftar_core::anchor::{TextAnchor, relocate_anchor};
 use daftar_core::direction::{Direction, resolve_direction};
 use daftar_core::markdown::{MdDocument, QuoteKind, parse_markdown};
 use daftar_core::model::{Bookmark, Document, Highlight};
-use daftar_core::settings::{AppSettings, TextAlign};
+use daftar_core::settings::{{AppSettings, TextAlign}, WidthPreset};
 use daftar_core::util::{now_ms, plain_text, truncate_chars};
 use daftar_store::Store;
 use daftar_text::TextEngine;
@@ -55,6 +55,11 @@ pub enum ReaderAction {
     OpenDocument(String),
     OpenExternal(String),
     SetDirection(Direction),
+    /// Persist a per-document reading width override (or clear it with two `None`s).
+    SetReadingWidth {
+        preset: Option<daftar_core::settings::WidthPreset>,
+        width: Option<f32>,
+    },
     ChangeFontSize(f32),
     ToggleTheme,
     ToggleRightPanel,
@@ -129,6 +134,9 @@ pub struct ReaderState {
     diagram_viewer: Option<DiagramViewer>,
     note_dialog: Option<NoteDialog>,
     highlight_menu: Option<HighlightMenu>,
+    width_menu_open: bool,
+    width_menu_pos: Option<Pos2>,
+    width_menu_fresh: bool,
     last_progress_save: i64,
     session_start: i64,
     session_progress_start: f32,
@@ -203,6 +211,9 @@ impl ReaderState {
             diagram_viewer: None,
             note_dialog: None,
             highlight_menu: None,
+            width_menu_open: false,
+            width_menu_pos: None,
+            width_menu_fresh: false,
             last_progress_save: 0,
             session_start: now_ms(),
             session_progress_start: settings
@@ -345,8 +356,15 @@ impl ReaderState {
             self.doc.direction
         };
         let resolved = resolve_direction(preference, &self.source).resolved;
-        self.config =
+        let mut config =
             ReaderConfig::from_settings(settings, palette, preference, resolved, &self.parsed);
+        // Per-document override wins over the global reading width preset.
+        config.reading_width = settings.reading.typography.resolve_width(
+            self.doc.reading_width_preset,
+            self.doc.reading_width,
+            available_width,
+        );
+        self.config = config;
         self.rebuild_layout(engine, code, &colors, available_width, settings);
     }
 
@@ -443,6 +461,13 @@ impl ReaderState {
                     actions.push(ReaderAction::ToggleTheme);
                 }
                 widgets::toolbar_divider(ui, palette);
+                let width_button =
+                    widgets::icon_button(ui, palette, Icon::Type, "Reading width", self.width_menu_open);
+                if width_button.clicked() {
+                    self.width_menu_open = !self.width_menu_open;
+                    self.width_menu_pos = Some(width_button.rect.left_bottom() + vec2(0.0, 4.0));
+                    self.width_menu_fresh = self.width_menu_open;
+                }
                 if widgets::icon_button(ui, palette, Icon::Plus, "Increase reading font size", false)
                     .clicked()
                 {
@@ -472,6 +497,7 @@ impl ReaderState {
                 }
             });
         });
+        self.show_width_menu(ui, palette, settings, &mut actions);
         // Thin reading progress line.
         let progress = self.progress();
         if progress > 0.0 {
@@ -1637,6 +1663,122 @@ impl ReaderState {
         }
         if close {
             self.note_dialog = None;
+        }
+    }
+
+    /// Reading width control: presets, a slider, a numeric field and a reset to the global
+    /// default. Changes are persisted per document through [`ReaderAction::SetReadingWidth`].
+    fn show_width_menu(
+        &mut self,
+        ui: &mut Ui,
+        palette: &Palette,
+        settings: &AppSettings,
+        actions: &mut Vec<ReaderAction>,
+    ) {
+        if !self.width_menu_open {
+            return;
+        }
+        let Some(pos) = self.width_menu_pos else {
+            self.width_menu_open = false;
+            return;
+        };
+        let typography = &settings.reading.typography;
+        let effective_preset = self
+            .doc
+            .reading_width_preset
+            .unwrap_or(typography.width_preset);
+        let mut chosen_preset: Option<WidthPreset> = None;
+        let mut custom_width = self.doc.reading_width.unwrap_or(typography.reading_width);
+        let mut numeric = custom_width;
+        let mut reset = false;
+        let mut close = false;
+        let ctx = ui.ctx().clone();
+        let menu_rect = egui::Area::new(Id::new("reader-width-menu"))
+            .order(Order::Foreground)
+            .fixed_pos(pos)
+            .layout(crate::rtl::root_layout())
+            .show(&ctx, |ui| {
+                egui::Frame::new()
+                    .fill(palette.surface)
+                    .stroke(Stroke::new(1.0, palette.border))
+                    .corner_radius(8.0)
+                    .inner_margin(egui::Margin::same(10))
+                    .shadow(egui::epaint::Shadow {
+                        offset: [0, 4],
+                        blur: 14,
+                        spread: 0,
+                        color: palette.shadow,
+                    })
+                    .show(ui, |ui| {
+                        ui.set_max_width(300.0);
+                        widgets::section_label(ui, palette, "Reading width");
+                        ui.horizontal_wrapped(|ui| {
+                            for preset in WidthPreset::ALL {
+                                let selected = preset == effective_preset;
+                                if widgets::chip(ui, palette, preset.label(), selected).clicked() {
+                                    chosen_preset = Some(preset);
+                                }
+                            }
+                        });
+                        let is_custom = effective_preset == WidthPreset::Custom;
+                        ui.horizontal(|ui| {
+                            ui.label(crate::i18n::t("Custom width"));
+                            ui.add(
+                                egui::DragValue::new(&mut numeric)
+                                    .range(320.0..=1400.0)
+                                    .speed(4.0)
+                                    .suffix(" px"),
+                            );
+                        });
+                        let slider = ui.add_enabled(
+                            is_custom || chosen_preset == Some(WidthPreset::Custom),
+                            egui::Slider::new(&mut custom_width, 320.0..=1400.0).show_value(false),
+                        );
+                        if slider.changed() || (numeric - custom_width).abs() > 0.5 {
+                            custom_width = numeric;
+                            chosen_preset = Some(WidthPreset::Custom);
+                        }
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            if widgets::button(ui, palette, "Use global default", None, ButtonVariant::Quiet)
+                                .clicked()
+                            {
+                                reset = true;
+                            }
+                            if widgets::button(ui, palette, "Close", None, ButtonVariant::Quiet).clicked() {
+                                close = true;
+                            }
+                        });
+                    })
+                    .response
+                    .rect
+            })
+            .inner;
+
+        let fresh = self.width_menu_fresh;
+        self.width_menu_fresh = false;
+        let pointer_outside = !fresh
+            && ctx
+                .input(|i| i.pointer.interact_pos())
+                .is_some_and(|p| !menu_rect.contains(p));
+        if let Some(preset) = chosen_preset {
+            let width = match preset {
+                WidthPreset::Custom => Some(custom_width),
+                _ => None,
+            };
+            actions.push(ReaderAction::SetReadingWidth {
+                preset: Some(preset),
+                width,
+            });
+            self.width_menu_open = false;
+        } else if reset {
+            actions.push(ReaderAction::SetReadingWidth {
+                preset: None,
+                width: None,
+            });
+            self.width_menu_open = false;
+        } else if close || (pointer_outside && ctx.input(|i| i.pointer.any_click())) {
+            self.width_menu_open = false;
         }
     }
 

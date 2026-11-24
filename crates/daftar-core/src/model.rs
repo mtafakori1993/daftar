@@ -103,6 +103,10 @@ pub struct Document {
     pub scroll_progress: f32,
     pub last_opened_at: Option<i64>,
     pub is_missing: bool,
+    /// Per-document reading width override in pixels; `None` uses the global default.
+    pub reading_width: Option<f32>,
+    /// Per-document reading width preset override; `None` uses the global default.
+    pub reading_width_preset: Option<crate::settings::WidthPreset>,
 }
 
 impl Document {
@@ -126,6 +130,8 @@ impl Document {
             scroll_progress: 0.0,
             last_opened_at: None,
             is_missing: false,
+            reading_width: None,
+            reading_width_preset: None,
         }
     }
 }

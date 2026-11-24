@@ -24,6 +24,7 @@ pub fn button(
     variant: ButtonVariant,
 ) -> Response {
     let label = crate::i18n::t(label);
+    let icon = icon.map(crate::rtl::mirrored_icon);
     let font = FontId::proportional(13.0);
     let galley = ui.ctx().fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font.clone(), palette.text));
     let icon_space = if icon.is_some() { 21.0 } else { 0.0 };
@@ -116,6 +117,7 @@ pub fn icon_button(
     selected: bool,
 ) -> Response {
     let tooltip = crate::i18n::t(tooltip);
+    let icon = crate::rtl::mirrored_icon(icon);
     icon_button_sized(ui, palette, icon, tooltip, selected, 30.0)
 }
 
@@ -128,6 +130,7 @@ pub fn icon_button_sized(
     size: f32,
 ) -> Response {
     let tooltip = crate::i18n::t(tooltip);
+    let icon = crate::rtl::mirrored_icon(icon);
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
     let bg = if selected {
         palette.accent_subtle
@@ -170,6 +173,7 @@ pub fn nav_item(
     badge: Option<u64>,
 ) -> Response {
     let label = crate::i18n::t(label);
+    let icon = crate::rtl::mirrored_icon(icon);
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
     let rtl = crate::rtl::is_rtl();

@@ -6,10 +6,16 @@ use std::time::Duration;
 use rusqlite::{Connection, OpenFlags};
 use thiserror::Error;
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Ordered migrations. Index + 1 is the schema version after applying it.
-pub const MIGRATIONS: &[&str] = &[MIGRATION_V1];
+pub const MIGRATIONS: &[&str] = &[MIGRATION_V1, MIGRATION_V2];
+
+/// v2: per-document reading width override (additive; existing rows keep `NULL`).
+const MIGRATION_V2: &str = r#"
+ALTER TABLE documents ADD COLUMN reading_width REAL;
+ALTER TABLE documents ADD COLUMN reading_width_preset TEXT;
+"#;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (
@@ -447,6 +453,48 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
         assert_eq!(store.integrity_check().unwrap(), "ok");
+    }
+
+    #[test]
+    fn upgrades_a_v1_database_and_keeps_its_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.db");
+        // Build a v1 database by hand: schema v1 plus a document row.
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATION_V1).unwrap();
+            conn.pragma_update(None, "user_version", 1i64).unwrap();
+            conn.execute(
+                "INSERT INTO libraries(id, name, root_path, created_at, updated_at)
+                 VALUES('lib','L','/tmp',0,0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO documents(id, library_id, rel_path, title, direction, created_at,
+                    updated_at, file_mtime_ms, file_size, content_hash, word_count,
+                    reading_progress, scroll_progress, is_missing)
+                 VALUES('doc','lib','a.md','A','auto',0,0,0,0,'',0,0,0,0)",
+                [],
+            )
+            .unwrap();
+        }
+        // Opening the store migrates to the current schema without touching existing rows.
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+        let document = store.document("doc").unwrap().unwrap();
+        assert_eq!(document.title, "A");
+        assert_eq!(document.reading_width, None);
+        assert_eq!(document.reading_width_preset, None);
+        // The new override can be written and read back on the migrated database.
+        store
+            .set_document_reading_width("doc", Some(daftar_core::settings::WidthPreset::Narrow), None)
+            .unwrap();
+        let document = store.document("doc").unwrap().unwrap();
+        assert_eq!(
+            document.reading_width_preset,
+            Some(daftar_core::settings::WidthPreset::Narrow)
+        );
     }
 
     #[test]

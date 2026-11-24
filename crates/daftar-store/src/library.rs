@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use daftar_core::direction::Direction;
+use daftar_core::settings::WidthPreset;
 use daftar_core::model::{
     Category, Collection, Document, Id, Library, LibraryStats, Tag, native_to_rel,
 };
@@ -13,7 +14,7 @@ use crate::db::{Result, Store, StoreError};
 
 const DOCUMENT_COLUMNS: &str = "id, library_id, collection_id, category_id, rel_path, title, \
      direction, created_at, updated_at, file_mtime_ms, file_size, content_hash, word_count, \
-     reading_progress, scroll_progress, last_opened_at, is_missing";
+     reading_progress, scroll_progress, last_opened_at, is_missing, reading_width, reading_width_preset";
 
 impl Store {
     pub fn upsert_library(&self, library: &Library) -> Result<()> {
@@ -178,7 +179,7 @@ impl Store {
         self.conn.execute(
             &format!(
                 "INSERT INTO documents({DOCUMENT_COLUMNS})
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
                  ON CONFLICT(id) DO UPDATE SET
                     collection_id=excluded.collection_id,
                     category_id=excluded.category_id,
@@ -193,7 +194,9 @@ impl Store {
                     reading_progress=excluded.reading_progress,
                     scroll_progress=excluded.scroll_progress,
                     last_opened_at=excluded.last_opened_at,
-                    is_missing=excluded.is_missing"
+                    is_missing=excluded.is_missing,
+                    reading_width=excluded.reading_width,
+                    reading_width_preset=excluded.reading_width_preset"
             ),
             params![
                 document.id,
@@ -213,6 +216,8 @@ impl Store {
                 document.scroll_progress,
                 document.last_opened_at,
                 document.is_missing as i64,
+                document.reading_width,
+                document.reading_width_preset.map(|preset| preset.as_db()),
             ],
         )?;
         Ok(())
@@ -272,6 +277,28 @@ impl Store {
         self.conn.execute(
             "UPDATE documents SET is_missing=?2, updated_at=?3 WHERE id=?1",
             params![id, missing as i64, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    /// Store or clear the per-document reading width override.
+    ///
+    /// `preset` takes precedence over `width` when both are set; passing `None` for both
+    /// restores the global default for this document.
+    pub fn set_document_reading_width(
+        &self,
+        id: &str,
+        preset: Option<WidthPreset>,
+        width: Option<f32>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE documents SET reading_width=?2, reading_width_preset=?3, updated_at=?4 WHERE id=?1",
+            params![
+                id,
+                width.map(|w| w as f64),
+                preset.map(|preset| preset.as_db()),
+                now_ms()
+            ],
         )?;
         Ok(())
     }
@@ -566,6 +593,12 @@ fn row_to_document(row: &Row<'_>) -> rusqlite::Result<Document> {
         scroll_progress: row.get::<_, f64>(14).unwrap_or(0.0) as f32,
         last_opened_at: row.get(15)?,
         is_missing: row.get::<_, i64>(16).unwrap_or(0) != 0,
+        reading_width: row.get::<_, Option<f64>>(17).ok().flatten().map(|v| v as f32),
+        reading_width_preset: row
+            .get::<_, Option<String>>(18)
+            .ok()
+            .flatten()
+            .map(|value| WidthPreset::from_db(&value)),
     })
 }
 
@@ -591,6 +624,47 @@ mod tests {
             store.library_by_root("/tmp/test-library").unwrap().unwrap().id,
             library.id
         );
+    }
+
+    #[test]
+    fn document_reading_width_override_round_trips() {
+        let (store, library) = store_with_library();
+        let doc = Document::new(library.id.clone(), "notes/width.md", "Width");
+        store.upsert_document(&doc).unwrap();
+
+        // No override by default.
+        let loaded = store.document(&doc.id).unwrap().unwrap();
+        assert_eq!(loaded.reading_width, None);
+        assert_eq!(loaded.reading_width_preset, None);
+
+        // Preset override.
+        store
+            .set_document_reading_width(&doc.id, Some(WidthPreset::Wide), None)
+            .unwrap();
+        let loaded = store.document(&doc.id).unwrap().unwrap();
+        assert_eq!(loaded.reading_width_preset, Some(WidthPreset::Wide));
+
+        // Custom pixel override.
+        store
+            .set_document_reading_width(&doc.id, Some(WidthPreset::Custom), Some(880.0))
+            .unwrap();
+        let loaded = store.document(&doc.id).unwrap().unwrap();
+        assert_eq!(loaded.reading_width_preset, Some(WidthPreset::Custom));
+        assert_eq!(loaded.reading_width, Some(880.0));
+
+        // Older rows keep `NULL`, and a full upsert preserves the override.
+        let mut doc = loaded.clone();
+        doc.title = "Width (renamed)".to_string();
+        store.upsert_document(&doc).unwrap();
+        let loaded = store.document(&doc.id).unwrap().unwrap();
+        assert_eq!(loaded.reading_width_preset, Some(WidthPreset::Custom));
+        assert_eq!(loaded.reading_width, Some(880.0));
+
+        // Clearing restores the global default.
+        store.set_document_reading_width(&doc.id, None, None).unwrap();
+        let loaded = store.document(&doc.id).unwrap().unwrap();
+        assert_eq!(loaded.reading_width, None);
+        assert_eq!(loaded.reading_width_preset, None);
     }
 
     #[test]

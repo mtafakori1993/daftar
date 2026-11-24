@@ -70,8 +70,11 @@ pub struct Typography {
     /// Heading gap in pixels.
     pub heading_spacing: f32,
     pub text_align: TextAlign,
-    /// Maximum measure in pixels.
+    /// Maximum measure in pixels; used by [`WidthPreset::Custom`] and as a fine adjustment.
     pub reading_width: f32,
+    /// Named reading width preset.
+    #[serde(default)]
+    pub width_preset: WidthPreset,
     pub code_font_family: String,
     pub code_font_size: f32,
 }
@@ -88,6 +91,7 @@ impl Default for Typography {
             heading_spacing: 18.0,
             text_align: TextAlign::Start,
             reading_width: 760.0,
+            width_preset: WidthPreset::Comfortable,
             code_font_family: "JetBrains Mono".to_string(),
             code_font_size: 13.5,
         }
@@ -95,6 +99,41 @@ impl Default for Typography {
 }
 
 impl Typography {
+    /// The measure the reader should use for `available` pixels of reading area.
+    ///
+    /// Named presets never exceed the available width, so the document never overflows
+    /// horizontally; [`WidthPreset::Full`] uses the whole reading area.
+    pub fn effective_width(&self, available: f32) -> f32 {
+        self.resolve_width(None, None, available)
+    }
+
+    /// Resolve the measure honouring per-document overrides.
+    ///
+    /// Precedence: per-document preset → per-document pixel width (treated as custom) →
+    /// global preset / global custom width.
+    pub fn resolve_width(
+        &self,
+        preset_override: Option<WidthPreset>,
+        width_override: Option<f32>,
+        available: f32,
+    ) -> f32 {
+        let available = available.max(160.0);
+        let clamp = |px: f32| px.clamp(320.0, 2000.0).min(available);
+        match (preset_override, width_override) {
+            (Some(WidthPreset::Custom), _) => clamp(width_override.unwrap_or(self.reading_width)),
+            (Some(preset), _) => match preset {
+                WidthPreset::Full => available,
+                other => clamp(other.nominal_width().unwrap_or(self.reading_width)),
+            },
+            (None, Some(px)) => clamp(px),
+            (None, None) => match self.width_preset {
+                WidthPreset::Full => available,
+                WidthPreset::Custom => clamp(self.reading_width),
+                preset => clamp(preset.nominal_width().unwrap_or(self.reading_width)),
+            },
+        }
+    }
+
     pub fn validate(&mut self) {
         self.font_size = self.font_size.clamp(11.0, 34.0);
         self.font_weight = self.font_weight.clamp(100, 900);
@@ -102,8 +141,92 @@ impl Typography {
         self.paragraph_spacing = self.paragraph_spacing.clamp(0.0, 48.0);
         self.letter_spacing = self.letter_spacing.clamp(-1.0, 4.0);
         self.heading_spacing = self.heading_spacing.clamp(0.0, 64.0);
-        self.reading_width = self.reading_width.clamp(420.0, 1400.0);
+        self.reading_width = self.reading_width.clamp(320.0, 2000.0);
         self.code_font_size = self.code_font_size.clamp(9.0, 26.0);
+    }
+}
+
+/// Reading width presets offered in the reader toolbar and in Settings → Reading.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WidthPreset {
+    /// 520 px — long-form, minimal eye travel.
+    Narrow,
+    /// 760 px — the default measure for comfortable reading.
+    #[default]
+    Comfortable,
+    /// 1040 px — dense technical documents.
+    Wide,
+    /// The full width of the reading area.
+    Full,
+    /// Use [`Typography::reading_width`] exactly.
+    Custom,
+}
+
+impl WidthPreset {
+    pub const ALL: [WidthPreset; 5] = [
+        WidthPreset::Narrow,
+        WidthPreset::Comfortable,
+        WidthPreset::Wide,
+        WidthPreset::Full,
+        WidthPreset::Custom,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            WidthPreset::Narrow => "Narrow",
+            WidthPreset::Comfortable => "Comfortable",
+            WidthPreset::Wide => "Wide",
+            WidthPreset::Full => "Full width",
+            WidthPreset::Custom => "Custom",
+        }
+    }
+
+    /// Nominal measure in pixels, or `None` for [`WidthPreset::Full`] and [`WidthPreset::Custom`].
+    pub fn nominal_width(self) -> Option<f32> {
+        match self {
+            WidthPreset::Narrow => Some(520.0),
+            WidthPreset::Comfortable => Some(760.0),
+            WidthPreset::Wide => Some(1040.0),
+            WidthPreset::Full | WidthPreset::Custom => None,
+        }
+    }
+
+    /// Storage representation used by the document table.
+    pub fn as_db(self) -> &'static str {
+        match self {
+            WidthPreset::Narrow => "narrow",
+            WidthPreset::Comfortable => "comfortable",
+            WidthPreset::Wide => "wide",
+            WidthPreset::Full => "full",
+            WidthPreset::Custom => "custom",
+        }
+    }
+
+    pub fn from_db(value: &str) -> Self {
+        match value {
+            "narrow" => WidthPreset::Narrow,
+            "wide" => WidthPreset::Wide,
+            "full" => WidthPreset::Full,
+            "custom" => WidthPreset::Custom,
+            _ => WidthPreset::Comfortable,
+        }
+    }
+
+    /// The preset implied by a width, if it matches one of the named measures.
+    pub fn from_width(width: f32) -> Self {
+        for preset in [
+            WidthPreset::Narrow,
+            WidthPreset::Comfortable,
+            WidthPreset::Wide,
+        ] {
+            if let Some(nominal) = preset.nominal_width() {
+                if (nominal - width).abs() < 1.0 {
+                    return preset;
+                }
+            }
+        }
+        WidthPreset::Custom
     }
 }
 
@@ -608,5 +731,77 @@ mod tests {
     #[test]
     fn default_persian_font_is_available() {
         assert_eq!(Typography::default().font_family, "Vazirmatn");
+    }
+}
+#[cfg(test)]
+mod width_tests {
+    use super::*;
+
+    #[test]
+    fn presets_resolve_to_their_nominal_measure() {
+        let mut typography = Typography::default();
+        typography.width_preset = WidthPreset::Narrow;
+        assert_eq!(typography.effective_width(1200.0), 520.0);
+        typography.width_preset = WidthPreset::Comfortable;
+        assert_eq!(typography.effective_width(1200.0), 760.0);
+        typography.width_preset = WidthPreset::Wide;
+        assert_eq!(typography.effective_width(1200.0), 1040.0);
+        typography.width_preset = WidthPreset::Full;
+        assert_eq!(typography.effective_width(1200.0), 1200.0);
+    }
+
+    #[test]
+    fn presets_never_overflow_the_available_width() {
+        let mut typography = Typography::default();
+        typography.width_preset = WidthPreset::Wide;
+        assert_eq!(typography.effective_width(700.0), 700.0);
+        assert_eq!(typography.effective_width(100.0), 160.0);
+    }
+
+    #[test]
+    fn custom_preset_uses_the_configured_measure() {
+        let mut typography = Typography::default();
+        typography.width_preset = WidthPreset::Custom;
+        typography.reading_width = 900.0;
+        assert_eq!(typography.effective_width(1200.0), 900.0);
+        // Clamped to the available area and to the supported range.
+        typography.reading_width = 1900.0;
+        assert_eq!(typography.effective_width(1000.0), 1000.0);
+        typography.reading_width = 100.0;
+        assert_eq!(typography.effective_width(1000.0), 320.0);
+    }
+
+    #[test]
+    fn per_document_overrides_take_precedence() {
+        let mut typography = Typography::default();
+        typography.width_preset = WidthPreset::Comfortable;
+        assert_eq!(typography.resolve_width(Some(WidthPreset::Narrow), None, 1200.0), 520.0);
+        assert_eq!(typography.resolve_width(None, Some(980.0), 1200.0), 980.0);
+        assert_eq!(typography.resolve_width(Some(WidthPreset::Full), None, 830.0), 830.0);
+        assert_eq!(
+            typography.resolve_width(Some(WidthPreset::Custom), Some(640.0), 1200.0),
+            640.0
+        );
+        // No override falls back to the global preset.
+        assert_eq!(typography.resolve_width(None, None, 1200.0), 760.0);
+    }
+
+    #[test]
+    fn preset_storage_round_trips() {
+        for preset in WidthPreset::ALL {
+            assert_eq!(WidthPreset::from_db(preset.as_db()), preset);
+        }
+        assert_eq!(WidthPreset::from_db("unknown"), WidthPreset::Comfortable);
+    }
+
+    #[test]
+    fn settings_toml_round_trips_the_width_preset() {
+        let mut settings = AppSettings::default();
+        settings.reading.typography.width_preset = WidthPreset::Wide;
+        settings.reading.typography.reading_width = 1000.0;
+        let text = settings.to_toml().expect("serialize");
+        let parsed = AppSettings::from_toml(&text).expect("parse");
+        assert_eq!(parsed.reading.typography.width_preset, WidthPreset::Wide);
+        assert_eq!(parsed.reading.typography.reading_width, 1000.0);
     }
 }

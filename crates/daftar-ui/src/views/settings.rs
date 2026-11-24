@@ -179,7 +179,48 @@ impl DaftarApp {
         ui.add(egui::Slider::new(&mut typography.paragraph_spacing, 0.0..=48.0).text(crate::i18n::t("Paragraph spacing")));
         ui.add(egui::Slider::new(&mut typography.letter_spacing, -1.0..=4.0).text(crate::i18n::t("Letter spacing")));
         ui.add(egui::Slider::new(&mut typography.heading_spacing, 0.0..=64.0).text(crate::i18n::t("Heading spacing")));
-        ui.add(egui::Slider::new(&mut typography.reading_width, 420.0..=1400.0).text(crate::i18n::t("Reading width")));
+        // Reading width: presets, slider and numeric entry. The presets and the custom
+        // width are the global default; individual documents can override them from the
+        // reader toolbar.
+        widgets::section_label(ui, palette, "Reading width");
+        ui.horizontal_wrapped(|ui| {
+            for preset in daftar_core::settings::WidthPreset::ALL {
+                let selected = typography.width_preset == preset;
+                if widgets::chip(ui, palette, preset.label(), selected).clicked() {
+                    typography.width_preset = preset;
+                    self.mark_dirty();
+                }
+            }
+        });
+        let custom = typography.width_preset == daftar_core::settings::WidthPreset::Custom;
+        ui.horizontal(|ui| {
+            ui.label(crate::i18n::t("Custom width"));
+            let mut width = typography.reading_width;
+            let value = ui.add(
+                egui::DragValue::new(&mut width)
+                    .range(320.0..=1400.0)
+                    .speed(4.0)
+                    .suffix(" px"),
+            );
+            if value.changed() {
+                typography.reading_width = width;
+                typography.width_preset = daftar_core::settings::WidthPreset::Custom;
+                self.mark_dirty();
+            }
+            let slider = ui.add_enabled(
+                custom,
+                egui::Slider::new(&mut typography.reading_width, 320.0..=1400.0).show_value(false),
+            );
+            if slider.changed() {
+                typography.width_preset = daftar_core::settings::WidthPreset::Custom;
+                self.mark_dirty();
+            }
+        });
+        widgets::hint(
+            ui,
+            palette,
+            "Presets apply to every document; the reader toolbar can override the width for one document.",
+        );
         ui.add(egui::Slider::new(&mut typography.code_font_size, 9.0..=26.0).text(crate::i18n::t("Code font size")));
         ui.horizontal(|ui| {
             ui.label(crate::i18n::t("Text alignment"));

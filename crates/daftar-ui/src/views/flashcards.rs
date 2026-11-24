@@ -178,10 +178,21 @@ impl DaftarApp {
             if i.key_pressed(egui::Key::Space) {
                 action = Some(Action::Flip);
             }
-            if i.key_pressed(egui::Key::ArrowRight) {
+            // Forward/back arrows follow the reading direction (left is forward in RTL).
+            let forward_key = if crate::rtl::is_rtl() {
+                egui::Key::ArrowLeft
+            } else {
+                egui::Key::ArrowRight
+            };
+            let backward_key = if crate::rtl::is_rtl() {
+                egui::Key::ArrowRight
+            } else {
+                egui::Key::ArrowLeft
+            };
+            if i.key_pressed(forward_key) {
                 action = Some(Action::Next);
             }
-            if i.key_pressed(egui::Key::ArrowLeft) {
+            if i.key_pressed(backward_key) {
                 action = Some(Action::Prev);
             }
             if i.key_pressed(egui::Key::L) {
