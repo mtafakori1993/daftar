@@ -11,7 +11,10 @@
 [CmdletBinding()]
 param(
     [switch]$NoBuild,
-    [switch]$PortableOnly
+    [switch]$PortableOnly,
+    # Forwarded to build-windows.ps1 so the release workflow can skip the gates it already ran.
+    [switch]$NoTests,
+    [switch]$NoClippy
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,7 +34,10 @@ $Dist = Join-Path $RepoRoot "dist"
 $Bin = Join-Path $RepoRoot "target\release\daftar.exe"
 
 if (-not $NoBuild) {
-    & (Join-Path $RepoRoot "scripts\build-windows.ps1")
+    $buildArgs = @()
+    if ($NoTests) { $buildArgs += "-NoTests" }
+    if ($NoClippy) { $buildArgs += "-NoClippy" }
+    & (Join-Path $RepoRoot "scripts\build-windows.ps1") @buildArgs
     if ($LASTEXITCODE -ne 0) { throw "build-windows.ps1 failed" }
 }
 if (-not (Test-Path $Bin)) { throw "missing $Bin" }

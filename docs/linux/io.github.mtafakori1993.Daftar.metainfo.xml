@@ -42,6 +42,13 @@
   </keywords>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.1.1" date="2026-11-24">
+      <description>
+        <p>Fixes the Windows packaging step of the release workflow and adds the
+        document reading-width control, the RTL application layout and per-document
+        reading width overrides.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-11-24">
       <description>
         <p>First public release: native Markdown reader with RTL support, diagrams,
