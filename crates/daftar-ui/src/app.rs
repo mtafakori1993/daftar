@@ -34,6 +34,7 @@ use crate::views::roadmaps::RoadmapsState;
 use crate::views::search::SearchState;
 use crate::views::settings::{SettingsState, SettingsTab};
 use crate::widgets::{self, ButtonVariant};
+use crate::rtl::DirUi;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -1417,8 +1418,16 @@ impl DaftarApp {
         let mut y = screen.bottom() - 56.0;
         for toast in self.toasts.iter().rev() {
             egui::Area::new(EguiId::new(("toast", toast.id)))
+            .layout(crate::rtl::root_layout())
                 .order(Order::Tooltip)
-                .fixed_pos(egui::pos2(screen.right() - 380.0, y))
+                .fixed_pos(egui::pos2(
+                    if crate::rtl::is_rtl() {
+                        screen.left() + 20.0
+                    } else {
+                        screen.right() - 380.0
+                    },
+                    y,
+                ))
                 .show(ctx, |ui| {
                     egui::Frame::new()
                         .fill(palette.surface)
@@ -1466,16 +1475,18 @@ impl DaftarApp {
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.set_max_width(420.0);
-                ui.label(RichText::new(&dialog.message).size(12.5).color(palette.text_secondary));
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    if widgets::button(ui, palette, &dialog.confirm_label, Some(Icon::Trash), ButtonVariant::Danger).clicked() {
-                        confirm = true;
-                    }
-                    if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
-                        cancel = true;
-                    }
+                ui.direction(|ui| {
+                    ui.set_max_width(420.0);
+                    ui.label(RichText::new(&dialog.message).size(12.5).color(palette.text_secondary));
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if widgets::button(ui, palette, &dialog.confirm_label, Some(Icon::Trash), ButtonVariant::Danger).clicked() {
+                            confirm = true;
+                        }
+                        if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
+                            cancel = true;
+                        }
+                    });
                 });
             });
         if confirm {
@@ -1496,21 +1507,23 @@ impl DaftarApp {
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.set_max_width(420.0);
-                ui.label(RichText::new(&prompt.label).size(12.0).color(palette.text_secondary));
-                ui.add_space(4.0);
-                let response = widgets::text_field(ui, palette, &mut prompt.value, "", 360.0);
-                if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                    save = true;
-                }
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if widgets::button(ui, palette, "Save", Some(Icon::Check), ButtonVariant::Primary).clicked() {
+                ui.direction(|ui| {
+                    ui.set_max_width(420.0);
+                    ui.label(RichText::new(&prompt.label).size(12.0).color(palette.text_secondary));
+                    ui.add_space(4.0);
+                    let response = widgets::text_field(ui, palette, &mut prompt.value, "", 360.0);
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                         save = true;
                     }
-                    if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
-                        cancel = true;
-                    }
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if widgets::button(ui, palette, "Save", Some(Icon::Check), ButtonVariant::Primary).clicked() {
+                            save = true;
+                        }
+                        if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
+                            cancel = true;
+                        }
+                    });
                 });
             });
         if save {
@@ -1532,60 +1545,62 @@ impl DaftarApp {
             .default_width(560.0)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.label(RichText::new(dialog.archive.display().to_string()).size(11.0).color(palette.text_secondary));
-                ui.separator();
-                if let Some(manifest) = &dialog.preview.manifest {
-                    ui.label(RichText::new(&manifest.library_name).size(15.0).strong());
+                ui.direction(|ui| {
+                    ui.label(RichText::new(dialog.archive.display().to_string()).size(11.0).color(palette.text_secondary));
+                    ui.separator();
+                    if let Some(manifest) = &dialog.preview.manifest {
+                        ui.label(RichText::new(&manifest.library_name).size(15.0).strong());
+                        ui.label(crate::i18n::tf(
+                            "Daftar {} · archive format v{} · {} documents · {} attachments · {} words",
+                            &[
+                                &manifest.app_version,
+                                &manifest.format_version.to_string(),
+                                &manifest.documents.to_string(),
+                                &manifest.attachments.to_string(),
+                                &manifest.total_words.to_string(),
+                            ]
+                        ));
+                    }
                     ui.label(crate::i18n::tf(
-                        "Daftar {} · archive format v{} · {} documents · {} attachments · {} words",
+                            "{} new document(s), {} already present. Archive size {}.",
                         &[
-                            &manifest.app_version,
-                            &manifest.format_version.to_string(),
-                            &manifest.documents.to_string(),
-                            &manifest.attachments.to_string(),
-                            &manifest.total_words.to_string(),
+                            &dialog.preview.new_documents.to_string(),
+                            &dialog.preview.duplicate_documents.to_string(),
+                            &format_bytes(dialog.preview.total_bytes),
                         ]
                     ));
-                }
-                ui.label(crate::i18n::tf(
-                        "{} new document(s), {} already present. Archive size {}.",
-                    &[
-                        &dialog.preview.new_documents.to_string(),
-                        &dialog.preview.duplicate_documents.to_string(),
-                        &format_bytes(dialog.preview.total_bytes),
-                    ]
-                ));
-                if !dialog.preview.fatal_errors.is_empty() {
-                    ui.colored_label(palette.danger, crate::i18n::t("This archive cannot be imported:"));
-                    for error in &dialog.preview.fatal_errors {
-                        ui.label(RichText::new(format!("• {error}")).size(11.5).color(palette.danger));
+                    if !dialog.preview.fatal_errors.is_empty() {
+                        ui.colored_label(palette.danger, crate::i18n::t("This archive cannot be imported:"));
+                        for error in &dialog.preview.fatal_errors {
+                            ui.label(RichText::new(format!("• {error}")).size(11.5).color(palette.danger));
+                        }
                     }
-                }
-                for warning in dialog.preview.warnings.iter().take(4) {
-                    ui.label(RichText::new(format!("• {warning}")).size(11.5).color(palette.warning));
-                }
-                ui.separator();
-                ui.label(RichText::new(crate::i18n::t("Duplicate documents")).strong());
-                ui.horizontal(|ui| {
-                    ui.radio_value(&mut dialog.strategy, daftar_core::archive::DuplicateStrategy::Skip, crate::i18n::t("Skip existing"));
-                    ui.radio_value(&mut dialog.strategy, daftar_core::archive::DuplicateStrategy::Replace, crate::i18n::t("Replace"));
-                    ui.radio_value(&mut dialog.strategy, daftar_core::archive::DuplicateStrategy::Rename, crate::i18n::t("Keep both"));
-                });
-                ui.add_space(4.0);
-                ui.checkbox(&mut dialog.restore_settings, crate::i18n::t("Restore application settings"));
-                ui.checkbox(&mut dialog.restore_cards, crate::i18n::t("Restore flashcards"));
-                ui.checkbox(&mut dialog.restore_roadmaps, crate::i18n::t("Restore study roadmaps"));
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    let enabled = dialog.preview.ok && !self.jobs.is_busy();
-                    ui.add_enabled_ui(enabled, |ui| {
-                        if widgets::button(ui, palette, "Import", Some(Icon::Import), ButtonVariant::Primary).clicked() {
-                            apply = true;
+                    for warning in dialog.preview.warnings.iter().take(4) {
+                        ui.label(RichText::new(format!("• {warning}")).size(11.5).color(palette.warning));
+                    }
+                    ui.separator();
+                    ui.label(RichText::new(crate::i18n::t("Duplicate documents")).strong());
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut dialog.strategy, daftar_core::archive::DuplicateStrategy::Skip, crate::i18n::t("Skip existing"));
+                        ui.radio_value(&mut dialog.strategy, daftar_core::archive::DuplicateStrategy::Replace, crate::i18n::t("Replace"));
+                        ui.radio_value(&mut dialog.strategy, daftar_core::archive::DuplicateStrategy::Rename, crate::i18n::t("Keep both"));
+                    });
+                    ui.add_space(4.0);
+                    ui.checkbox(&mut dialog.restore_settings, crate::i18n::t("Restore application settings"));
+                    ui.checkbox(&mut dialog.restore_cards, crate::i18n::t("Restore flashcards"));
+                    ui.checkbox(&mut dialog.restore_roadmaps, crate::i18n::t("Restore study roadmaps"));
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        let enabled = dialog.preview.ok && !self.jobs.is_busy();
+                        ui.add_enabled_ui(enabled, |ui| {
+                            if widgets::button(ui, palette, "Import", Some(Icon::Import), ButtonVariant::Primary).clicked() {
+                                apply = true;
+                            }
+                        });
+                        if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
+                            cancel = true;
                         }
                     });
-                    if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
-                        cancel = true;
-                    }
                 });
             });
         if apply {
@@ -1605,52 +1620,54 @@ impl DaftarApp {
             .default_width(480.0)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.label(RichText::new(crate::i18n::t("Front")).size(11.5).color(palette.text_secondary));
-                ui.add(
-                    egui::TextEdit::multiline(&mut editor.card.front)
-                        .desired_rows(3)
-                        .desired_width(440.0),
-                );
-                ui.add_space(4.0);
-                ui.label(RichText::new(crate::i18n::t("Back")).size(11.5).color(palette.text_secondary));
-                ui.add(
-                    egui::TextEdit::multiline(&mut editor.card.back)
-                        .desired_rows(3)
-                        .desired_width(440.0),
-                );
-                ui.add_space(4.0);
-                ui.label(RichText::new(crate::i18n::t("Explanation (optional)")).size(11.5).color(palette.text_secondary));
-                ui.add(
-                    egui::TextEdit::multiline(&mut editor.card.explanation)
-                        .desired_rows(2)
-                        .desired_width(440.0),
-                );
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.label(crate::i18n::t("Tags"));
-                    let mut tags = editor.card.tags.join(", ");
-                    if widgets::text_field(ui, palette, &mut tags, crate::i18n::t("comma separated"), 320.0).changed() {
-                        editor.card.tags = tags
-                            .split(',')
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty())
-                            .collect();
+                ui.direction(|ui| {
+                    ui.label(RichText::new(crate::i18n::t("Front")).size(11.5).color(palette.text_secondary));
+                    ui.add(
+                        egui::TextEdit::multiline(&mut editor.card.front)
+                            .desired_rows(3)
+                            .desired_width(440.0),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(crate::i18n::t("Back")).size(11.5).color(palette.text_secondary));
+                    ui.add(
+                        egui::TextEdit::multiline(&mut editor.card.back)
+                            .desired_rows(3)
+                            .desired_width(440.0),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(crate::i18n::t("Explanation (optional)")).size(11.5).color(palette.text_secondary));
+                    ui.add(
+                        egui::TextEdit::multiline(&mut editor.card.explanation)
+                            .desired_rows(2)
+                            .desired_width(440.0),
+                    );
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(crate::i18n::t("Tags"));
+                        let mut tags = editor.card.tags.join(", ");
+                        if widgets::text_field(ui, palette, &mut tags, crate::i18n::t("comma separated"), 320.0).changed() {
+                            editor.card.tags = tags
+                                .split(',')
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                        }
+                    });
+                    if let Some(source) = &editor.source_title {
+                        ui.label(RichText::new(crate::i18n::tf("Source · {}", &[&source])).size(10.5).color(palette.text_secondary));
                     }
-                });
-                if let Some(source) = &editor.source_title {
-                    ui.label(RichText::new(crate::i18n::tf("Source · {}", &[&source])).size(10.5).color(palette.text_secondary));
-                }
-                if let Some(error) = &editor.error {
-                    ui.colored_label(palette.danger, error);
-                }
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if widgets::button(ui, palette, "Save card", Some(Icon::Check), ButtonVariant::Primary).clicked() {
-                        save = true;
+                    if let Some(error) = &editor.error {
+                        ui.colored_label(palette.danger, error);
                     }
-                    if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
-                        cancel = true;
-                    }
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if widgets::button(ui, palette, "Save card", Some(Icon::Check), ButtonVariant::Primary).clicked() {
+                            save = true;
+                        }
+                        if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
+                            cancel = true;
+                        }
+                    });
                 });
             });
         if save {
@@ -1691,7 +1708,7 @@ impl eframe::App for DaftarApp {
         let mut root = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(screen)
-                .layout(egui::Layout::top_down(egui::Align::Min)),
+                .layout(crate::rtl::root_layout()),
         );
         let ui = &mut root;
         let screen = ctx.content_rect();
@@ -1718,14 +1735,11 @@ impl eframe::App for DaftarApp {
         );
         let splitter_w = 5.0;
         if self.show_left {
-            let splitter = egui::Rect::from_min_size(
-                egui::pos2(screen.left() + left_w - splitter_w * 0.5, body.top()),
-                vec2(splitter_w, body.height()),
-            );
+            let splitter = crate::rtl::leading_splitter(body, left_w, splitter_w);
             let response = ui.interact(splitter, EguiId::new("left-splitter"), Sense::drag());
             if response.dragged() {
                 if let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) {
-                    left_w = (pointer.x - screen.left()).clamp(190.0, 380.0);
+                    left_w = crate::rtl::leading_width_for(body, pointer.x).clamp(190.0, 380.0);
                 }
             }
             if response.hovered() || response.dragged() {
@@ -1733,14 +1747,11 @@ impl eframe::App for DaftarApp {
             }
         }
         if right_w > 0.0 {
-            let splitter = egui::Rect::from_min_size(
-                egui::pos2(screen.right() - right_w - splitter_w * 0.5, body.top()),
-                vec2(splitter_w, body.height()),
-            );
+            let splitter = crate::rtl::trailing_splitter(body, right_w, splitter_w);
             let response = ui.interact(splitter, EguiId::new("right-splitter"), Sense::drag());
             if response.dragged() {
                 if let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) {
-                    right_w = (screen.right() - pointer.x).clamp(220.0, 520.0);
+                    right_w = crate::rtl::trailing_width_for(body, pointer.x).clamp(220.0, 520.0);
                 }
             }
             if response.hovered() || response.dragged() {
@@ -1755,18 +1766,9 @@ impl eframe::App for DaftarApp {
             self.settings.window.right_panel_width = right_w;
             self.mark_dirty();
         }
-        let left_rect = egui::Rect::from_min_size(
-            egui::pos2(screen.left(), body.top()),
-            vec2(left_w, body.height()),
-        );
-        let right_rect = egui::Rect::from_min_size(
-            egui::pos2(screen.right() - right_w, body.top()),
-            vec2(right_w, body.height()),
-        );
-        let central = egui::Rect::from_min_max(
-            egui::pos2(screen.left() + left_w, body.top()),
-            egui::pos2(screen.right() - right_w, body.bottom()),
-        );
+        let left_rect = crate::rtl::leading_block(body, left_w);
+        let right_rect = crate::rtl::trailing_block(body, right_w);
+        let central = crate::rtl::central_block(body, left_w, right_w);
         {
             let painter = ui.painter();
             painter.rect_filled(screen, 0.0, palette.canvas);
@@ -1793,9 +1795,11 @@ impl eframe::App for DaftarApp {
                 palette.border,
             );
             if left_w > 0.0 {
+                let edge = crate::rtl::leading_inner_edge(left_rect);
+                let x = if crate::rtl::is_rtl() { edge } else { edge - 1.0 };
                 painter.rect_filled(
                     egui::Rect::from_min_size(
-                        egui::pos2(left_rect.right() - 1.0, left_rect.top()),
+                        egui::pos2(x, left_rect.top()),
                         vec2(1.0, left_rect.height()),
                     ),
                     0.0,
@@ -1803,9 +1807,11 @@ impl eframe::App for DaftarApp {
                 );
             }
             if right_w > 0.0 {
+                let edge = crate::rtl::trailing_inner_edge(right_rect);
+                let x = if crate::rtl::is_rtl() { edge - 1.0 } else { edge };
                 painter.rect_filled(
                     egui::Rect::from_min_size(
-                        egui::pos2(right_rect.left(), right_rect.top()),
+                        egui::pos2(x, right_rect.top()),
                         vec2(1.0, right_rect.height()),
                     ),
                     0.0,
@@ -1817,7 +1823,7 @@ impl eframe::App for DaftarApp {
             let mut top_ui = ui.new_child(
                 egui::UiBuilder::new()
                     .max_rect(top.shrink2(vec2(12.0, 7.0)))
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    .layout(crate::rtl::bar_layout()),
             );
             top_ui.shrink_clip_rect(top);
             self.show_topbar(&mut top_ui, &palette);
@@ -1826,7 +1832,7 @@ impl eframe::App for DaftarApp {
             let mut bottom_ui = ui.new_child(
                 egui::UiBuilder::new()
                     .max_rect(bottom.shrink2(vec2(12.0, 4.0)))
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    .layout(crate::rtl::bar_layout()),
             );
             bottom_ui.shrink_clip_rect(bottom);
             self.show_statusbar(&mut bottom_ui, &palette, &ctx);
@@ -1836,7 +1842,7 @@ impl eframe::App for DaftarApp {
             let mut sidebar_ui = ui.new_child(
                 egui::UiBuilder::new()
                     .max_rect(inner)
-                    .layout(egui::Layout::top_down(egui::Align::Min)),
+                    .layout(crate::rtl::root_layout()),
             );
             sidebar_ui.shrink_clip_rect(left_rect);
             egui::ScrollArea::vertical()
@@ -1851,7 +1857,7 @@ impl eframe::App for DaftarApp {
             let mut side_ui = ui.new_child(
                 egui::UiBuilder::new()
                     .max_rect(inner)
-                    .layout(egui::Layout::top_down(egui::Align::Min)),
+                    .layout(crate::rtl::root_layout()),
             );
             side_ui.shrink_clip_rect(right_rect);
             if let Some(reader) = &mut self.reader {
@@ -1870,7 +1876,7 @@ impl eframe::App for DaftarApp {
         let mut central_ui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(central_inner)
-                .layout(egui::Layout::top_down(egui::Align::Min)),
+                .layout(crate::rtl::root_layout()),
         );
         central_ui.shrink_clip_rect(central_inner);
         match self.view {

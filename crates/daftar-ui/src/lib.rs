@@ -5,6 +5,7 @@ pub mod code;
 pub mod i18n;
 pub mod icons;
 pub mod picker;
+pub mod rtl;
 pub mod tasks;
 pub mod views;
 pub mod images;

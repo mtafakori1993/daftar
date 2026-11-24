@@ -86,16 +86,19 @@ pub fn button(
             StrokeKind::Outside,
         );
     }
-    let mut x = rect.left() + 12.0;
+    let rtl = crate::rtl::is_rtl();
+    let mut x = if rtl { rect.right() - 12.0 } else { rect.left() + 12.0 };
     if let Some(icon) = icon {
+        let icon_x = if rtl { x - 16.0 } else { x };
         let icon_rect =
-            Rect::from_min_size(egui::pos2(x, rect.center().y - 8.0), Vec2::splat(16.0));
+            Rect::from_min_size(egui::pos2(icon_x, rect.center().y - 8.0), Vec2::splat(16.0));
         draw_icon(ui.painter(), icon, icon_rect, fg);
-        x += 21.0;
+        x = if rtl { x - 21.0 } else { x + 21.0 };
     }
     let galley = ui.ctx().fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font, fg));
+    let label_x = if rtl { x - galley.size().x } else { x };
     ui.painter().galley(
-        egui::pos2(x, rect.center().y - galley.size().y * 0.5),
+        egui::pos2(label_x, rect.center().y - galley.size().y * 0.5),
         galley,
         fg,
     );
@@ -169,11 +172,17 @@ pub fn nav_item(
     let label = crate::i18n::t(label);
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+    let rtl = crate::rtl::is_rtl();
+    let bar_x = if rtl {
+        rect.right() - 2.5
+    } else {
+        rect.left()
+    };
     if selected {
         ui.painter().rect_filled(rect, 6.0, palette.accent_subtle);
         ui.painter().rect_filled(
             Rect::from_min_size(
-                egui::pos2(rect.left(), rect.top() + 7.0),
+                egui::pos2(bar_x, rect.top() + 7.0),
                 vec2(2.5, rect.height() - 14.0),
             ),
             1.5,
@@ -187,8 +196,9 @@ pub fn nav_item(
     } else {
         palette.text_secondary
     };
+    let icon_x = if rtl { rect.right() - 26.0 } else { rect.left() + 10.0 };
     let icon_rect = Rect::from_min_size(
-        egui::pos2(rect.left() + 10.0, rect.center().y - 8.0),
+        egui::pos2(icon_x, rect.center().y - 8.0),
         Vec2::splat(16.0),
     );
     draw_icon(ui.painter(), icon, icon_rect, color);
@@ -200,8 +210,13 @@ pub fn nav_item(
     let galley = ui.ctx().fonts_mut(|f| {
         f.layout_no_wrap(label.to_owned(), FontId::proportional(13.0), text_color)
     });
+    let label_x = if rtl {
+        rect.right() - 36.0 - galley.size().x
+    } else {
+        rect.left() + 36.0
+    };
     ui.painter().galley(
-        egui::pos2(rect.left() + 36.0, rect.center().y - galley.size().y * 0.5),
+        egui::pos2(label_x, rect.center().y - galley.size().y * 0.5),
         galley,
         text_color,
     );
@@ -215,8 +230,13 @@ pub fn nav_item(
             )
         });
         let w = badge_galley.size().x + 12.0;
+        let badge_x = if rtl {
+            rect.left() + 8.0
+        } else {
+            rect.right() - w - 8.0
+        };
         let badge_rect = Rect::from_min_size(
-            egui::pos2(rect.right() - w - 8.0, rect.center().y - 9.0),
+            egui::pos2(badge_x, rect.center().y - 9.0),
             vec2(w, 18.0),
         );
         ui.painter()
@@ -343,8 +363,13 @@ pub fn section_label(ui: &mut Ui, palette: &Palette, text: &str) {
         vec2(ui.available_width(), galley.size().y + 8.0),
         Sense::hover(),
     );
+    let x = if crate::rtl::is_rtl() {
+        rect.right() - galley.size().x
+    } else {
+        rect.left()
+    };
     ui.painter().galley(
-        egui::pos2(rect.left(), rect.top() + 4.0),
+        egui::pos2(x, rect.top() + 4.0),
         galley,
         palette.text_secondary,
     );
@@ -431,19 +456,39 @@ pub fn search_field(
         ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
     ui.painter()
         .rect_filled(rect, 6.0, palette.surface_sunken);
-    draw_icon(
-        ui.painter(),
-        Icon::Search,
-        Rect::from_min_size(
-            egui::pos2(rect.left() + 9.0, rect.center().y - 7.0),
-            Vec2::splat(14.0),
-        ),
-        palette.text_secondary,
-    );
-    let inner = Rect::from_min_max(
-        egui::pos2(rect.left() + 30.0, rect.top() + 4.0),
-        egui::pos2(rect.right() - 8.0, rect.bottom() - 4.0),
-    );
+    // The magnifier sits on the leading edge: left in LTR, right in RTL.
+    if crate::rtl::is_rtl() {
+        draw_icon(
+            ui.painter(),
+            Icon::Search,
+            Rect::from_min_size(
+                egui::pos2(rect.right() - 23.0, rect.center().y - 7.0),
+                Vec2::splat(14.0),
+            ),
+            palette.text_secondary,
+        );
+    } else {
+        draw_icon(
+            ui.painter(),
+            Icon::Search,
+            Rect::from_min_size(
+                egui::pos2(rect.left() + 9.0, rect.center().y - 7.0),
+                Vec2::splat(14.0),
+            ),
+            palette.text_secondary,
+        );
+    }
+    let inner = if crate::rtl::is_rtl() {
+        Rect::from_min_max(
+            egui::pos2(rect.left() + 8.0, rect.top() + 4.0),
+            egui::pos2(rect.right() - 30.0, rect.bottom() - 4.0),
+        )
+    } else {
+        Rect::from_min_max(
+            egui::pos2(rect.left() + 30.0, rect.top() + 4.0),
+            egui::pos2(rect.right() - 8.0, rect.bottom() - 4.0),
+        )
+    };
     let response = ui.put(
         inner,
         TextEdit::singleline(value)

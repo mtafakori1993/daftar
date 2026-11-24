@@ -66,10 +66,11 @@ impl DaftarApp {
         );
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            widgets::search_field(ui, palette, &mut self.search.query, crate::i18n::t("Search the library…"));
+            // Button first so the field sizes to the remaining width (see the library view).
             if widgets::button(ui, palette, "Search", Some(Icon::Search), widgets::ButtonVariant::Primary).clicked() {
                 self.search.last_signature.clear();
             }
+            widgets::search_field(ui, palette, &mut self.search.query, crate::i18n::t("Search the library…"));
         });
         ui.horizontal_wrapped(|ui| {
             if widgets::chip(ui, palette, crate::i18n::t("All"), self.search.kind.is_none()).clicked() {

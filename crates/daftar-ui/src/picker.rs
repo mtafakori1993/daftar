@@ -14,6 +14,7 @@ use crate::shaped::{ShapedStyle, shaped_label};
 use crate::theme::Palette;
 use crate::widgets::{self, ButtonVariant};
 use crate::{Icon, icons::draw_icon};
+use crate::rtl::DirUi;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickerMode {
@@ -219,183 +220,185 @@ impl FilePicker {
             .min_size(vec2(520.0, 360.0))
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                // Path bar.
-                ui.horizontal(|ui| {
-                    if widgets::icon_button(ui, palette, Icon::ArrowLeft, "Parent folder", false)
-                        .clicked()
-                    {
-                        self.go_up();
+                ui.direction(|ui| {
+                    // Path bar.
+                    ui.horizontal(|ui| {
+                        if widgets::icon_button(ui, palette, Icon::ArrowLeft, "Parent folder", false)
+                            .clicked()
+                        {
+                            self.go_up();
+                        }
+                        if widgets::button(ui, palette, "New folder", Some(Icon::Folder), ButtonVariant::Quiet).clicked() {
+                            self.create_folder();
+                        }
+                        let path_text = self.current_dir.to_string_lossy().to_string();
+                        let max = (ui.available_width() - 140.0).max(120.0);
+                        shaped_label(
+                            ui,
+                            engine,
+                            &path_text,
+                            &ShapedStyle::body().with_size(12.0),
+                            palette.text_secondary,
+                            max,
+                            Sense::hover(),
+                        );
+                    });
+                    if !self.places.is_empty() {
+                        ui.horizontal_wrapped(|ui| {
+                            for (name, path) in self.places.clone() {
+                                if widgets::chip(ui, palette, &name, self.current_dir == path).clicked() {
+                                    self.navigate(path);
+                                }
+                            }
+                        });
                     }
-                    if widgets::button(ui, palette, "New folder", Some(Icon::Folder), ButtonVariant::Quiet).clicked() {
-                        self.create_folder();
+                    ui.separator();
+                    if let Some(error) = &self.error {
+                        ui.label(egui::RichText::new(error).color(palette.danger).size(12.0));
                     }
-                    let path_text = self.current_dir.to_string_lossy().to_string();
-                    let max = (ui.available_width() - 140.0).max(120.0);
-                    shaped_label(
-                        ui,
-                        engine,
-                        &path_text,
-                        &ShapedStyle::body().with_size(12.0),
-                        palette.text_secondary,
-                        max,
-                        Sense::hover(),
-                    );
-                });
-                if !self.places.is_empty() {
-                    ui.horizontal_wrapped(|ui| {
-                        for (name, path) in self.places.clone() {
-                            if widgets::chip(ui, palette, &name, self.current_dir == path).clicked() {
+                    let list_height = (ui.available_height() - 92.0).max(120.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("picker-list")
+                        .max_height(list_height)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let mut navigate_to: Option<PathBuf> = None;
+                            let multi = self.mode == PickerMode::OpenFiles;
+                            for entry in self.entries.clone() {
+                                let selected = self.selected.contains(&entry.path);
+                                let (rect, response) = ui.allocate_exact_size(
+                                    vec2(ui.available_width(), 30.0),
+                                    Sense::click(),
+                                );
+                                if selected {
+                                    ui.painter().rect_filled(rect, 4.0, palette.selected);
+                                } else if response.hovered() {
+                                    ui.painter().rect_filled(rect, 4.0, palette.surface_hover);
+                                }
+                                let icon = if entry.is_dir {
+                                    Icon::Folder
+                                } else {
+                                    Icon::FileText
+                                };
+                                draw_icon(
+                                    ui.painter(),
+                                    icon,
+                                    egui::Rect::from_min_size(
+                                        rect.min + vec2(8.0, 7.0),
+                                        Vec2::splat(16.0),
+                                    ),
+                                    if entry.is_dir { palette.warning } else { palette.text_secondary },
+                                );
+                                let (shaped, _) = crate::shaped::shape(
+                                    engine,
+                                    &entry.name,
+                                    &ShapedStyle::body().with_size(13.0),
+                                    0.0,
+                                );
+                                let text_colors = daftar_text::TextColors {
+                                    text: palette.text,
+                                    link: palette.accent,
+                                    code: palette.text,
+                                    code_background: None,
+                                    selection: Color32::TRANSPARENT,
+                                };
+                                let clip = egui::Rect::from_min_max(
+                                    egui::pos2(rect.left() + 30.0, rect.top()),
+                                    egui::pos2(rect.right() - 160.0, rect.bottom()),
+                                );
+                                let painter = ui.painter().with_clip_rect(clip);
+                                engine.paint(
+                                    ui.ctx(),
+                                    &painter,
+                                    &shaped,
+                                    egui::pos2(rect.left() + 30.0, rect.top() + 5.0),
+                                    &text_colors,
+                                    None,
+                                    &[],
+                                );
+                                if !entry.is_dir {
+                                    ui.painter().text(
+                                        egui::pos2(rect.right() - 150.0, rect.center().y),
+                                        Align2::RIGHT_CENTER,
+                                        format_size(entry.size),
+                                        egui::FontId::proportional(10.5),
+                                        palette.text_secondary,
+                                    );
+                                }
+                                if response.clicked() {
+                                    self.select_row(entry.path.clone(), multi);
+                                }
+                                if response.double_clicked() {
+                                    if entry.is_dir {
+                                        navigate_to = Some(entry.path.clone());
+                                    } else {
+                                        result = Some(PickerResult::Picked(vec![entry.path.clone()]));
+                                    }
+                                }
+                            }
+                            if let Some(path) = navigate_to {
                                 self.navigate(path);
                             }
-                        }
-                    });
-                }
-                ui.separator();
-                if let Some(error) = &self.error {
-                    ui.label(egui::RichText::new(error).color(palette.danger).size(12.0));
-                }
-                let list_height = (ui.available_height() - 92.0).max(120.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("picker-list")
-                    .max_height(list_height)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let mut navigate_to: Option<PathBuf> = None;
-                        let multi = self.mode == PickerMode::OpenFiles;
-                        for entry in self.entries.clone() {
-                            let selected = self.selected.contains(&entry.path);
-                            let (rect, response) = ui.allocate_exact_size(
-                                vec2(ui.available_width(), 30.0),
-                                Sense::click(),
+                        });
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        if self.mode == PickerMode::SaveFile {
+                            ui.label(crate::i18n::t("File name"));
+                            let name_response = widgets::text_field(
+                                ui,
+                                palette,
+                                &mut self.filename,
+                                "name.md",
+                                320.0,
                             );
-                            if selected {
-                                ui.painter().rect_filled(rect, 4.0, palette.selected);
-                            } else if response.hovered() {
-                                ui.painter().rect_filled(rect, 4.0, palette.surface_hover);
-                            }
-                            let icon = if entry.is_dir {
-                                Icon::Folder
-                            } else {
-                                Icon::FileText
-                            };
-                            draw_icon(
-                                ui.painter(),
-                                icon,
-                                egui::Rect::from_min_size(
-                                    rect.min + vec2(8.0, 7.0),
-                                    Vec2::splat(16.0),
-                                ),
-                                if entry.is_dir { palette.warning } else { palette.text_secondary },
-                            );
-                            let (shaped, _) = crate::shaped::shape(
-                                engine,
-                                &entry.name,
-                                &ShapedStyle::body().with_size(13.0),
-                                0.0,
-                            );
-                            let text_colors = daftar_text::TextColors {
-                                text: palette.text,
-                                link: palette.accent,
-                                code: palette.text,
-                                code_background: None,
-                                selection: Color32::TRANSPARENT,
-                            };
-                            let clip = egui::Rect::from_min_max(
-                                egui::pos2(rect.left() + 30.0, rect.top()),
-                                egui::pos2(rect.right() - 160.0, rect.bottom()),
-                            );
-                            let painter = ui.painter().with_clip_rect(clip);
-                            engine.paint(
-                                ui.ctx(),
-                                &painter,
-                                &shaped,
-                                egui::pos2(rect.left() + 30.0, rect.top() + 5.0),
-                                &text_colors,
-                                None,
-                                &[],
-                            );
-                            if !entry.is_dir {
-                                ui.painter().text(
-                                    egui::pos2(rect.right() - 150.0, rect.center().y),
-                                    Align2::RIGHT_CENTER,
-                                    format_size(entry.size),
-                                    egui::FontId::proportional(10.5),
-                                    palette.text_secondary,
-                                );
-                            }
-                            if response.clicked() {
-                                self.select_row(entry.path.clone(), multi);
-                            }
-                            if response.double_clicked() {
-                                if entry.is_dir {
-                                    navigate_to = Some(entry.path.clone());
-                                } else {
-                                    result = Some(PickerResult::Picked(vec![entry.path.clone()]));
+                            if name_response.lost_focus()
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                            {
+                                if let Some(path) = self.save_path() {
+                                    result = Some(PickerResult::Picked(vec![path]));
                                 }
                             }
                         }
-                        if let Some(path) = navigate_to {
-                            self.navigate(path);
+                        let mut hidden = self.show_hidden;
+                        if widgets::toggle(ui, palette, &mut hidden).clicked() {
+                            self.show_hidden = hidden;
+                            self.refresh();
                         }
-                    });
-                ui.separator();
-                ui.horizontal(|ui| {
-                    if self.mode == PickerMode::SaveFile {
-                        ui.label(crate::i18n::t("File name"));
-                        let name_response = widgets::text_field(
-                            ui,
-                            palette,
-                            &mut self.filename,
-                            "name.md",
-                            320.0,
+                        ui.label(
+                            egui::RichText::new(crate::i18n::t("Show hidden"))
+                                .size(11.5)
+                                .color(palette.text_secondary),
                         );
-                        if name_response.lost_focus()
-                            && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                        {
-                            if let Some(path) = self.save_path() {
-                                result = Some(PickerResult::Picked(vec![path]));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
+                                result = Some(PickerResult::Cancelled);
                             }
-                        }
-                    }
-                    let mut hidden = self.show_hidden;
-                    if widgets::toggle(ui, palette, &mut hidden).clicked() {
-                        self.show_hidden = hidden;
-                        self.refresh();
-                    }
-                    ui.label(
-                        egui::RichText::new(crate::i18n::t("Show hidden"))
-                            .size(11.5)
-                            .color(palette.text_secondary),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
-                            result = Some(PickerResult::Cancelled);
-                        }
-                        let label = match self.mode {
-                            PickerMode::OpenFolder => "Use folder",
-                            PickerMode::SaveFile => "Save",
-                            _ => crate::i18n::t("Select"),
-                        };
-                        if widgets::button(ui, palette, label, Some(Icon::Check), ButtonVariant::Primary).clicked() {
-                            match self.mode {
-                                PickerMode::OpenFolder => {
-                                    result = Some(PickerResult::Picked(vec![self.current_dir.clone()]));
-                                }
-                                PickerMode::SaveFile => {
-                                    if let Some(path) = self.save_path() {
-                                        result = Some(PickerResult::Picked(vec![path]));
+                            let label = match self.mode {
+                                PickerMode::OpenFolder => "Use folder",
+                                PickerMode::SaveFile => "Save",
+                                _ => crate::i18n::t("Select"),
+                            };
+                            if widgets::button(ui, palette, label, Some(Icon::Check), ButtonVariant::Primary).clicked() {
+                                match self.mode {
+                                    PickerMode::OpenFolder => {
+                                        result = Some(PickerResult::Picked(vec![self.current_dir.clone()]));
                                     }
-                                }
-                                _ => {
-                                    if !self.selected.is_empty() {
-                                        let mut paths: Vec<PathBuf> =
-                                            self.selected.iter().cloned().collect();
-                                        paths.sort();
-                                        result = Some(PickerResult::Picked(paths));
+                                    PickerMode::SaveFile => {
+                                        if let Some(path) = self.save_path() {
+                                            result = Some(PickerResult::Picked(vec![path]));
+                                        }
+                                    }
+                                    _ => {
+                                        if !self.selected.is_empty() {
+                                            let mut paths: Vec<PathBuf> =
+                                                self.selected.iter().cloned().collect();
+                                            paths.sort();
+                                            result = Some(PickerResult::Picked(paths));
+                                        }
                                     }
                                 }
                             }
-                        }
+                        });
                     });
                 });
             });

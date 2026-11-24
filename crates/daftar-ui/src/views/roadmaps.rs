@@ -10,6 +10,7 @@ use egui::Ui;
 use crate::app::{DaftarApp, PromptAction, TextPrompt};
 use crate::theme::Palette;
 use crate::{Icon, shaped::{shape, ShapedStyle}, widgets};
+use crate::rtl::DirUi;
 
 #[derive(Debug, Clone, Default)]
 pub struct RoadmapsState {
@@ -371,81 +372,83 @@ impl DaftarApp {
             .default_width(480.0)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.label(crate::i18n::t("Title"));
-                widgets::text_field(ui, palette, &mut editor.node.title, "Title", 420.0);
-                ui.label(crate::i18n::t("Notes"));
-                ui.add(egui::TextEdit::multiline(&mut editor.node.notes).desired_rows(3).desired_width(420.0));
-                ui.horizontal(|ui| {
-                    ui.label(crate::i18n::t("Kind"));
-                    egui::ComboBox::from_id_salt("node-kind").selected_text(editor.node.kind.label()).show_ui(ui, |ui| {
-                        for kind in [NodeKind::Section, NodeKind::Task, NodeKind::Milestone] {
-                            ui.selectable_value(&mut editor.node.kind, kind, kind.label());
-                        }
-                    });
-                    ui.label(crate::i18n::t("Status"));
-                    egui::ComboBox::from_id_salt("node-status").selected_text(editor.node.status.label()).show_ui(ui, |ui| {
-                        for status in [TaskStatus::NotStarted, TaskStatus::InProgress, TaskStatus::Completed, TaskStatus::Skipped] {
-                            ui.selectable_value(&mut editor.node.status, status, status.label());
-                        }
-                    });
-                });
-                ui.horizontal(|ui| {
-                    ui.label(crate::i18n::t("Estimated minutes"));
-                    let mut est = editor.node.estimated_minutes as i32;
-                    if ui.add(egui::DragValue::new(&mut est).range(0..=10000)).changed() {
-                        editor.node.estimated_minutes = est.max(0) as u32;
-                    }
-                    ui.label(crate::i18n::t("Actual minutes"));
-                    let mut actual = editor.node.actual_minutes as i32;
-                    if ui.add(egui::DragValue::new(&mut actual).range(0..=100000)).changed() {
-                        editor.node.actual_minutes = actual.max(0) as u32;
-                    }
-                });
-                ui.separator();
-                ui.label(egui::RichText::new(crate::i18n::t("Reference")).size(11.5).color(palette.text_secondary));
-                ui.horizontal(|ui| {
-                    let mut docs: Vec<(String, String)> = self.docs.iter().map(|d| (d.id.clone(), d.title.clone())).collect();
-                    docs.sort_by(|a, b| a.1.cmp(&b.1));
-                    let selected = editor.ref_document.clone();
-                    let label = selected.as_ref().and_then(|id| docs.iter().find(|(d, _)| d == id)).map(|(_, t)| t.clone()).unwrap_or_else(|| crate::i18n::t("Link a document").into());
-                    egui::ComboBox::from_id_salt("ref-doc").selected_text(label).show_ui(ui, |ui| {
-                        for (id, title) in &docs {
-                            if ui.selectable_label(editor.ref_document.as_deref() == Some(id), title).clicked() {
-                                editor.ref_document = Some(id.clone());
-                            }
-                        }
-                    });
-                    if widgets::button(ui, palette, "Add", Some(Icon::Plus), widgets::ButtonVariant::Quiet).clicked() {
-                        add_ref = true;
-                    }
-                });
-                ui.horizontal(|ui| {
-                    widgets::text_field(ui, palette, &mut editor.ref_url, "https://…", 300.0);
-                    if widgets::button(ui, palette, "Add URL", Some(Icon::Link), widgets::ButtonVariant::Quiet).clicked() {
-                        add_ref = true;
-                    }
-                });
-                if let Some(refs) = self.roadmaps.refs.get(&editor.node.id) {
-                    for reference in refs {
-                        ui.horizontal(|ui| {
-                            ui.label(if reference.label.is_empty() { reference.target.clone() } else { reference.label.clone() });
-                            if widgets::icon_button_sized(ui, palette, Icon::Trash, "Remove reference", false, 22.0).clicked() {
-                                delete_ref = Some(reference.id.clone());
+                ui.direction(|ui| {
+                    ui.label(crate::i18n::t("Title"));
+                    widgets::text_field(ui, palette, &mut editor.node.title, "Title", 420.0);
+                    ui.label(crate::i18n::t("Notes"));
+                    ui.add(egui::TextEdit::multiline(&mut editor.node.notes).desired_rows(3).desired_width(420.0));
+                    ui.horizontal(|ui| {
+                        ui.label(crate::i18n::t("Kind"));
+                        egui::ComboBox::from_id_salt("node-kind").selected_text(editor.node.kind.label()).show_ui(ui, |ui| {
+                            for kind in [NodeKind::Section, NodeKind::Task, NodeKind::Milestone] {
+                                ui.selectable_value(&mut editor.node.kind, kind, kind.label());
                             }
                         });
+                        ui.label(crate::i18n::t("Status"));
+                        egui::ComboBox::from_id_salt("node-status").selected_text(editor.node.status.label()).show_ui(ui, |ui| {
+                            for status in [TaskStatus::NotStarted, TaskStatus::InProgress, TaskStatus::Completed, TaskStatus::Skipped] {
+                                ui.selectable_value(&mut editor.node.status, status, status.label());
+                            }
+                        });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(crate::i18n::t("Estimated minutes"));
+                        let mut est = editor.node.estimated_minutes as i32;
+                        if ui.add(egui::DragValue::new(&mut est).range(0..=10000)).changed() {
+                            editor.node.estimated_minutes = est.max(0) as u32;
+                        }
+                        ui.label(crate::i18n::t("Actual minutes"));
+                        let mut actual = editor.node.actual_minutes as i32;
+                        if ui.add(egui::DragValue::new(&mut actual).range(0..=100000)).changed() {
+                            editor.node.actual_minutes = actual.max(0) as u32;
+                        }
+                    });
+                    ui.separator();
+                    ui.label(egui::RichText::new(crate::i18n::t("Reference")).size(11.5).color(palette.text_secondary));
+                    ui.horizontal(|ui| {
+                        let mut docs: Vec<(String, String)> = self.docs.iter().map(|d| (d.id.clone(), d.title.clone())).collect();
+                        docs.sort_by(|a, b| a.1.cmp(&b.1));
+                        let selected = editor.ref_document.clone();
+                        let label = selected.as_ref().and_then(|id| docs.iter().find(|(d, _)| d == id)).map(|(_, t)| t.clone()).unwrap_or_else(|| crate::i18n::t("Link a document").into());
+                        egui::ComboBox::from_id_salt("ref-doc").selected_text(label).show_ui(ui, |ui| {
+                            for (id, title) in &docs {
+                                if ui.selectable_label(editor.ref_document.as_deref() == Some(id), title).clicked() {
+                                    editor.ref_document = Some(id.clone());
+                                }
+                            }
+                        });
+                        if widgets::button(ui, palette, "Add", Some(Icon::Plus), widgets::ButtonVariant::Quiet).clicked() {
+                            add_ref = true;
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        widgets::text_field(ui, palette, &mut editor.ref_url, "https://…", 300.0);
+                        if widgets::button(ui, palette, "Add URL", Some(Icon::Link), widgets::ButtonVariant::Quiet).clicked() {
+                            add_ref = true;
+                        }
+                    });
+                    if let Some(refs) = self.roadmaps.refs.get(&editor.node.id) {
+                        for reference in refs {
+                            ui.horizontal(|ui| {
+                                ui.label(if reference.label.is_empty() { reference.target.clone() } else { reference.label.clone() });
+                                if widgets::icon_button_sized(ui, palette, Icon::Trash, "Remove reference", false, 22.0).clicked() {
+                                    delete_ref = Some(reference.id.clone());
+                                }
+                            });
+                        }
                     }
-                }
-                if let Some(error) = &editor.error {
-                    ui.colored_label(palette.danger, error);
-                }
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if widgets::button(ui, palette, "Save", Some(Icon::Check), widgets::ButtonVariant::Primary).clicked() {
-                        save = true;
+                    if let Some(error) = &editor.error {
+                        ui.colored_label(palette.danger, error);
                     }
-                    if widgets::button(ui, palette, "Cancel", None, widgets::ButtonVariant::Quiet).clicked() {
-                        cancel = true;
-                    }
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if widgets::button(ui, palette, "Save", Some(Icon::Check), widgets::ButtonVariant::Primary).clicked() {
+                            save = true;
+                        }
+                        if widgets::button(ui, palette, "Cancel", None, widgets::ButtonVariant::Quiet).clicked() {
+                            cancel = true;
+                        }
+                    });
                 });
             });
         if save {

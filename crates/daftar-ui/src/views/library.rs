@@ -98,8 +98,8 @@ impl DaftarApp {
         );
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            crate::widgets::search_field(ui, palette, &mut self.library_state.query, crate::i18n::t("Filter documents by title or tag…"));
-            ui.add_space(4.0);
+            // The action buttons come first so the field can size itself to the remaining
+            // width; otherwise the field would claim the full row and push the buttons out.
             if crate::widgets::button(ui, palette, "New collection", Some(Icon::Collections), crate::widgets::ButtonVariant::Quiet).clicked() {
                 self.prompt = Some(crate::app::TextPrompt {
                     title: "New collection".into(),
@@ -116,6 +116,8 @@ impl DaftarApp {
                     action: crate::app::PromptAction::NewCategory,
                 });
             }
+            ui.add_space(4.0);
+            crate::widgets::search_field(ui, palette, &mut self.library_state.query, crate::i18n::t("Filter documents by title or tag…"));
         });
         // Filters.
         ui.horizontal_wrapped(|ui| {
@@ -217,10 +219,14 @@ impl DaftarApp {
                     } else if response.hovered() {
                         ui.painter().rect_filled(rect, 6.0, palette.surface_hover);
                     }
+                    let rtl = crate::rtl::is_rtl();
                     crate::icons::draw_icon(
                         ui.painter(),
                         Icon::FileText,
-                        egui::Rect::from_min_size(rect.min + egui::vec2(12.0, 16.0), egui::Vec2::splat(18.0)),
+                        egui::Rect::from_min_size(
+                            egui::pos2(crate::rtl::leading_x(rect, 30.0), rect.min.y + 16.0),
+                            egui::Vec2::splat(18.0),
+                        ),
                         palette.text_secondary,
                     );
                     let (title, _) = crate::shaped::shape(
@@ -236,33 +242,45 @@ impl DaftarApp {
                         code_background: None,
                         selection: egui::Color32::TRANSPARENT,
                     };
+                    let title_width = title
+                        .lines
+                        .iter()
+                        .map(|line| line.width)
+                        .fold(0.0f32, f32::max);
+                    let title_x = crate::rtl::leading_x(rect, 40.0)
+                        - if rtl { title_width } else { 0.0 };
                     self.engine.paint(
                         ui.ctx(),
                         ui.painter(),
                         &title,
-                        rect.min + egui::vec2(40.0, 8.0),
+                        egui::pos2(title_x, rect.min.y + 8.0),
                         &text_colors,
                         None,
                         &[],
                     );
                     ui.painter().text(
-                        rect.min + egui::vec2(40.0, 30.0),
-                        egui::Align2::LEFT_TOP,
+                        egui::pos2(crate::rtl::leading_x(rect, 40.0), rect.min.y + 30.0),
+                        crate::rtl::align2_leading_top(),
                         &doc.rel_path,
                         egui::FontId::proportional(10.5),
                         palette.text_secondary,
                     );
+                    let trailing_anchor = if rtl {
+                        rect.left() + 120.0
+                    } else {
+                        rect.right() - 120.0
+                    };
                     if doc.is_missing {
                         ui.painter().text(
-                            egui::pos2(rect.right() - 120.0, rect.center().y),
-                            egui::Align2::RIGHT_CENTER,
+                            egui::pos2(trailing_anchor, rect.center().y),
+                            if rtl { egui::Align2::LEFT_CENTER } else { egui::Align2::RIGHT_CENTER },
                             crate::i18n::t("Missing file"),
                             egui::FontId::proportional(10.5),
                             palette.danger,
                         );
                     } else if doc.reading_progress > 0.001 {
                         let bar = egui::Rect::from_min_size(
-                            egui::pos2(rect.right() - 120.0, rect.center().y - 2.0),
+                            egui::pos2(trailing_anchor - 84.0, rect.center().y - 2.0),
                             egui::vec2(84.0, 4.0),
                         );
                         ui.painter().rect_filled(bar, 2.0, palette.surface_sunken);

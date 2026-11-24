@@ -27,6 +27,7 @@ use crate::reader::layout::{
 use crate::shaped::{ShapedStyle, shaped_label};
 use crate::theme::{Palette, ReaderColors, ToastKind};
 use crate::widgets::{self, ButtonVariant};
+use crate::rtl::DirUi;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextSelection {
@@ -1441,6 +1442,7 @@ impl ReaderState {
         let mut export = false;
 
         egui::Area::new(Id::new("selection-toolbar"))
+            .layout(crate::rtl::root_layout())
             .order(Order::Foreground)
             .fixed_pos(pos)
             .show(ctx, |ui| {
@@ -1570,34 +1572,36 @@ impl ReaderState {
             .default_width(420.0)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.label(
-                    RichText::new(crate::i18n::t("A highlight with your note will be saved at this selection."))
-                        .size(12.0)
-                        .color(palette.text_secondary),
-                );
-                ui.add_space(6.0);
-                ui.add(
-                    egui::TextEdit::multiline(&mut dialog.text)
-                        .desired_rows(4)
-                        .desired_width(380.0)
-                        .hint_text(crate::i18n::t("Your note…")),
-                );
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if widgets::button(
-                        ui,
-                        palette,
-                        "Save note",
-                        Some(Icon::Check),
-                        ButtonVariant::Primary,
-                    )
-                    .clicked()
-                    {
-                        save = true;
-                    }
-                    if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
-                        close = true;
-                    }
+                ui.direction(|ui| {
+                    ui.label(
+                        RichText::new(crate::i18n::t("A highlight with your note will be saved at this selection."))
+                            .size(12.0)
+                            .color(palette.text_secondary),
+                    );
+                    ui.add_space(6.0);
+                    ui.add(
+                        egui::TextEdit::multiline(&mut dialog.text)
+                            .desired_rows(4)
+                            .desired_width(380.0)
+                            .hint_text(crate::i18n::t("Your note…")),
+                    );
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if widgets::button(
+                            ui,
+                            palette,
+                            "Save note",
+                            Some(Icon::Check),
+                            ButtonVariant::Primary,
+                        )
+                        .clicked()
+                        {
+                            save = true;
+                        }
+                        if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
+                            close = true;
+                        }
+                    });
                 });
             });
         if save {
@@ -1663,6 +1667,7 @@ impl ReaderState {
         let mut dismiss = false;
 
         let menu_rect = egui::Area::new(Id::new("highlight-menu"))
+            .layout(crate::rtl::root_layout())
             .order(Order::Foreground)
             .fixed_pos(menu.pos)
             .show(ctx, |ui| {
@@ -1806,6 +1811,7 @@ impl ReaderState {
         let mut close = false;
         let mut export = false;
         egui::Area::new(Id::new("diagram-viewer"))
+            .layout(crate::rtl::root_layout())
             .order(Order::Foreground)
             .fixed_pos(ctx.content_rect().min)
             .show(ctx, |ui| {
