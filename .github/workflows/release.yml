@@ -146,7 +146,7 @@ jobs:
 
       - name: Build and package (portable zip, installer)
         shell: pwsh
-        run: scripts/package-windows.ps1 -NoTests -NoClippy
+        run: ./scripts/package-windows.ps1 -NoTests -NoClippy
 
       - name: Verify artifacts
         shell: pwsh
