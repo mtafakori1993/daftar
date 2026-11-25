@@ -113,13 +113,18 @@ impl DaftarApp {
                 if let Some(progress) = &self.jobs.progress {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(140.0, 4.0), egui::Sense::hover());
                     ui.painter().rect_filled(rect, 2.0, palette.surface_sunken);
-                    if progress.total > 0 {
-                        let f = (progress.done as f32 / progress.total as f32).clamp(0.0, 1.0);
+                    if let Some(f) = progress.fraction() {
                         ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(rect.width() * f, 4.0)), 2.0, palette.accent);
                     }
                 }
-                if widgets::button(ui, palette, "Cancel", Some(Icon::Close), ButtonVariant::Quiet).clicked() {
+                if self.jobs.can_cancel()
+                    && widgets::icon_button(ui, palette, Icon::Close, "Cancel indexing", false).clicked()
+                {
                     self.jobs.cancel();
+                } else if self.jobs.cancel_requested() {
+                    ui.add_enabled_ui(false, |ui| {
+                        widgets::button(ui, palette, "Canceling…", Some(Icon::Close), ButtonVariant::Quiet);
+                    });
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

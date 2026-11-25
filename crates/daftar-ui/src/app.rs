@@ -146,6 +146,13 @@ pub struct ImportDialogState {
     pub restore_roadmaps: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PasteMarkdownDialog {
+    pub title: String,
+    pub markdown: String,
+    pub error: Option<String>,
+}
+
 pub struct FlashcardEditor {
     pub card: Flashcard,
     pub is_new: bool,
@@ -185,12 +192,14 @@ pub struct DaftarApp {
     pub jobs: Jobs,
     pub(crate) watcher: Option<LibraryWatcher>,
     pub(crate) pending_paths: Vec<PathBuf>,
+    pub(crate) pending_full_scan: bool,
     pub(crate) last_fs_event: i64,
     pub(crate) toasts: Vec<Toast>,
     pub(crate) toast_seq: u64,
     pub(crate) confirm: Option<ConfirmDialog>,
     pub(crate) prompt: Option<TextPrompt>,
     pub import_dialog: Option<ImportDialogState>,
+    pub(crate) paste_markdown: Option<PasteMarkdownDialog>,
     pub flashcard_editor: Option<FlashcardEditor>,
     pub(crate) dark: bool,
     pub(crate) logo: Option<egui::TextureHandle>,
@@ -289,12 +298,14 @@ impl DaftarApp {
             jobs: Jobs::new(),
             watcher: None,
             pending_paths: Vec::new(),
+            pending_full_scan: false,
             last_fs_event: 0,
             toasts: Vec::new(),
             toast_seq: 1,
             confirm: None,
             prompt: None,
             import_dialog: None,
+            paste_markdown: None,
             flashcard_editor: None,
             dark,
             logo: app_logo(ctx),
@@ -546,6 +557,10 @@ impl DaftarApp {
     pub(crate) fn poll_jobs(&mut self, ctx: &egui::Context) {
         for event in self.jobs.poll() {
             match event {
+                JobEvent::Started { .. } => {}
+                JobEvent::CancelStarted { .. } => {
+                    self.status = crate::i18n::t("Canceling…").into();
+                }
                 JobEvent::Progress { done, total, message, .. } => {
                     self.status = if total > 0 {
                         crate::i18n::tf("{}  ({}/{})", &[&message.to_string(), &done.to_string(), &total.to_string()])
@@ -553,12 +568,21 @@ impl DaftarApp {
                         message
                     };
                 }
-                JobEvent::IndexDone(summary) => {
+                JobEvent::IndexDone { summary, .. } => {
                     self.reload();
-                    self.status = crate::i18n::tf(
-                        "Library indexed: {} added, {} updated, {} missing",
-                        &[&summary.added.to_string(), &summary.updated.to_string(), &summary.missing.to_string()]
-                    );
+                    self.status = if summary.cancelled {
+                        crate::i18n::t("Indexing cancelled.").into()
+                    } else {
+                        crate::i18n::tf(
+                            "Library indexed: {} added, {} updated, {} unchanged, {} missing",
+                            &[
+                                &summary.added.to_string(),
+                                &summary.updated.to_string(),
+                                &summary.unchanged.to_string(),
+                                &summary.missing.to_string(),
+                            ]
+                        )
+                    };
                     if !summary.warnings.is_empty() {
                         self.toast(
                             format!("Indexing finished with {} warning(s).", summary.warnings.len()),
@@ -582,7 +606,9 @@ impl DaftarApp {
                         }
                     }
                 }
-                JobEvent::ExportDone(result) => match result {
+                JobEvent::ExportDone { result, cancelled, .. } => if cancelled {
+                    self.status = crate::i18n::t("Export cancelled.").into();
+                } else { match result {
                     Ok(report) => {
                         self.status =
                             crate::i18n::tf("Export complete: {}", &[&report.path.display().to_string()]);
@@ -598,8 +624,8 @@ impl DaftarApp {
                         self.status = crate::i18n::t("Export failed").into();
                         self.toast(crate::i18n::tf("Export failed: {}", &[&error.to_string()]), ToastKind::Error);
                     }
-                },
-                JobEvent::ImportDone(result) => match result {
+                }},
+                JobEvent::ImportDone { result, .. } => match result {
                     Ok(report) => {
                         self.status = crate::i18n::t("Import complete").into();
                         let summary = &report.summary;
@@ -637,7 +663,7 @@ impl DaftarApp {
                         self.status = crate::i18n::t("Import failed").into();
                     }
                 },
-                JobEvent::Failed { job, error } => {
+                JobEvent::Failed { job, error, .. } => {
                     self.toast(crate::i18n::tf("{} failed: {}", &[&job.to_string(), &error.to_string()]), ToastKind::Error);
                     self.status = crate::i18n::tf("{} failed", &[&job.to_string()]);
                 }
@@ -645,25 +671,31 @@ impl DaftarApp {
         }
     }
 
-    fn poll_watcher(&mut self) {
-        let Some(watcher) = &self.watcher else { return };
-        let paths = watcher.drain();
-        if !paths.is_empty() {
+    fn poll_watcher(&mut self, ctx: &egui::Context) {
+        let batch = self.watcher.as_ref().map(LibraryWatcher::drain).unwrap_or_default();
+        if !batch.paths.is_empty() || batch.full_rescan {
             self.last_fs_event = now_ms();
-            self.pending_paths.extend(paths);
+            self.pending_paths.extend(batch.paths);
             self.pending_paths.sort();
             self.pending_paths.dedup();
+            self.pending_full_scan |= batch.full_rescan;
         }
-        if self.pending_paths.is_empty() || now_ms() - self.last_fs_event < 850 {
+        if self.pending_paths.is_empty() && !self.pending_full_scan {
+            return;
+        }
+        let elapsed = now_ms() - self.last_fs_event;
+        if elapsed < 850 {
+            ctx.request_repaint_after(Duration::from_millis((850 - elapsed).max(1) as u64));
             return;
         }
         if self.jobs.is_busy() {
+            ctx.request_repaint_after(Duration::from_millis(250));
             return;
         }
         let paths = std::mem::take(&mut self.pending_paths);
+        let full_rescan = std::mem::take(&mut self.pending_full_scan);
         let Some(library) = &self.library else { return };
-        let all_markdown = paths.iter().all(|p| is_markdown(p) || !p.exists());
-        if all_markdown && paths.len() <= 80 {
+        if !full_rescan && !paths.is_empty() && paths.len() <= 80 {
             let _ = self.jobs.start_sync_paths(
                 self.config.db_path.clone(),
                 library.clone(),
@@ -680,6 +712,8 @@ impl DaftarApp {
             if self.picker.is_some() {
                 self.picker = None;
                 self.picker_purpose = None;
+            } else if self.paste_markdown.is_some() {
+                self.paste_markdown = None;
             } else if self.import_dialog.is_some() {
                 self.import_dialog = None;
             } else if self.prompt.is_some() {
@@ -688,7 +722,11 @@ impl DaftarApp {
                 reader.selection = None;
             }
         }
-        if self.picker.is_some() || self.import_dialog.is_some() || self.prompt.is_some() {
+        if self.picker.is_some()
+            || self.paste_markdown.is_some()
+            || self.import_dialog.is_some()
+            || self.prompt.is_some()
+        {
             return;
         }
         if shortcut(ui, self.settings.shortcut("search"))
@@ -1422,6 +1460,7 @@ impl DaftarApp {
         self.show_confirm(ctx, &palette);
         self.show_prompt(ctx, &palette);
         self.show_import_dialog(ctx, &palette);
+        self.show_paste_markdown_dialog(ctx, &palette);
         self.show_flashcard_editor(ctx, &palette);
         if let Some(picker) = &mut self.picker {
             if let Some(result) = picker.show(ctx, &mut self.engine, &palette) {
@@ -1632,6 +1671,86 @@ impl DaftarApp {
         }
     }
 
+    fn show_paste_markdown_dialog(&mut self, ctx: &egui::Context, palette: &Palette) {
+        let Some(dialog) = self.paste_markdown.as_mut() else { return };
+        let mut open = true;
+        let mut save = false;
+        let mut cancel = false;
+        egui::Window::new(crate::i18n::t("Import Markdown text"))
+            .collapsible(false)
+            .resizable(true)
+            .default_size([640.0, 500.0])
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.direction(|ui| {
+                    ui.label(crate::i18n::t("Document title (optional)"));
+                    ui.add(egui::TextEdit::singleline(&mut dialog.title).desired_width(ui.available_width()));
+                    ui.label(crate::i18n::t(
+                        "A Markdown heading sets the document title; this value names the file.",
+                    ));
+                    ui.add_space(6.0);
+                    ui.label(crate::i18n::t("Markdown content"));
+                    ui.add(
+                        egui::TextEdit::multiline(&mut dialog.markdown)
+                            .desired_width(ui.available_width())
+                            .desired_rows(18)
+                            .hint_text(crate::i18n::t("Paste Markdown content here…")),
+                    );
+                    if let Some(error) = &dialog.error {
+                        ui.colored_label(palette.danger, error);
+                    }
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.add_enabled_ui(!dialog.markdown.trim().is_empty(), |ui| {
+                            if widgets::button(ui, palette, "Add to library", Some(Icon::Import), ButtonVariant::Primary).clicked() {
+                                save = true;
+                            }
+                        });
+                        if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
+                            cancel = true;
+                        }
+                    });
+                });
+            });
+
+        if cancel || !open {
+            self.paste_markdown = None;
+            return;
+        }
+        if !save {
+            return;
+        }
+
+        let Some(library) = self.library.clone() else {
+            if let Some(dialog) = &mut self.paste_markdown {
+                dialog.error = Some(crate::i18n::t("Open a library before importing Markdown.").into());
+            }
+            return;
+        };
+        let (title, markdown) = self
+            .paste_markdown
+            .as_ref()
+            .map(|dialog| (dialog.title.clone(), dialog.markdown.clone()))
+            .unwrap_or_default();
+        match crate::tasks::write_pasted_markdown(Path::new(&library.root_path), &title, &markdown) {
+            Ok(path) => {
+                self.paste_markdown = None;
+                self.pending_paths.push(path);
+                self.pending_paths.sort();
+                self.pending_paths.dedup();
+                self.last_fs_event = now_ms();
+                self.status = crate::i18n::t("Markdown text added; indexing queued.").into();
+                self.toast(crate::i18n::t("Markdown text added to the library."), ToastKind::Success);
+            }
+            Err(error) => {
+                if let Some(dialog) = &mut self.paste_markdown {
+                    dialog.error = Some(error);
+                }
+            }
+        }
+    }
+
     fn show_flashcard_editor(&mut self, ctx: &egui::Context, palette: &Palette) {
         let Some(editor) = self.flashcard_editor.as_mut() else { return };
         let mut save = false;
@@ -1720,7 +1839,7 @@ impl eframe::App for DaftarApp {
         let ctx = ui.ctx().clone();
         self.resolve_dark(&ctx);
         self.poll_jobs(&ctx);
-        self.poll_watcher();
+        self.poll_watcher(&ctx);
         self.handle_shortcuts(ui);
         let palette = Palette::new(self.dark);
         let mut reader_actions = Vec::new();

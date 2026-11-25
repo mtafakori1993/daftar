@@ -61,7 +61,7 @@ impl DaftarApp {
         use crate::widgets::empty_state;
         use crate::Icon;
         ui.add_space(10.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.heading(crate::i18n::t("Library"));
             ui.add_space(8.0);
             if crate::widgets::button(ui, palette, "Import files", Some(Icon::Import), crate::widgets::ButtonVariant::Secondary).clicked() {
@@ -72,6 +72,9 @@ impl DaftarApp {
                     &["md", "markdown", "mdown"],
                     "",
                 );
+            }
+            if crate::widgets::button(ui, palette, "Paste Markdown", Some(Icon::Note), crate::widgets::ButtonVariant::Secondary).clicked() {
+                self.paste_markdown = Some(crate::app::PasteMarkdownDialog::default());
             }
             if crate::widgets::button(ui, palette, "Add folder", Some(Icon::Folder), crate::widgets::ButtonVariant::Secondary).clicked() {
                 self.open_picker(

@@ -281,6 +281,30 @@ impl Store {
         Ok(())
     }
 
+    /// Atomically update missing flags, aborting without changes when cancellation is requested.
+    pub fn set_documents_missing_cancellable(
+        &self,
+        ids: &[String],
+        missing: bool,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<bool> {
+        let tx = self.conn.unchecked_transaction()?;
+        for id in ids {
+            if cancelled() {
+                return Ok(false);
+            }
+            tx.execute(
+                "UPDATE documents SET is_missing=?2, updated_at=?3 WHERE id=?1",
+                params![id, missing as i64, now_ms()],
+            )?;
+        }
+        if cancelled() {
+            return Ok(false);
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
     /// Store or clear the per-document reading width override.
     ///
     /// `preset` takes precedence over `width` when both are set; passing `None` for both
