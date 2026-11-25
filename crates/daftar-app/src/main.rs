@@ -43,14 +43,14 @@ fn run() -> Result<()> {
     }
 
     let settings = load_settings(&paths.settings_path);
-    let width = settings.window.width.max(1000.0);
-    let height = settings.window.height.max(680.0);
+    let width = settings.window.width.max(760.0);
+    let height = settings.window.height.max(560.0);
     let icon = app_icon();
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Daftar")
             .with_inner_size([width, height])
-            .with_min_inner_size([980.0, 620.0])
+            .with_min_inner_size([760.0, 560.0])
             .with_icon(Arc::new(icon)),
         ..Default::default()
     };
