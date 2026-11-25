@@ -33,13 +33,16 @@ WIN_STEM="daftar-${VERSION}-windows-x86_64"
 DEB_ASSET="daftar_${VERSION}_amd64.deb"
 DOWNLOAD="${REPO_URL}/releases/download/${TAG}"
 
-# Notes for the previous tag, when the repository has one.
+# Notes since the previous tag. During local release preparation the new tag does not
+# exist yet, so use HEAD; in CI the tag is already present.
 CHANGES=""
+TARGET="HEAD"
 if git -C "${REPO_ROOT}" rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
-    PREV="$(git -C "${REPO_ROOT}" describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
-    if [[ -n "${PREV}" ]]; then
-        CHANGES="$(git -C "${REPO_ROOT}" log --no-merges --pretty='- %s' "${PREV}..${TAG}" || true)"
-    fi
+    TARGET="${TAG}"
+fi
+PREV="$(git -C "${REPO_ROOT}" describe --tags --abbrev=0 "${TARGET}^" 2>/dev/null || true)"
+if [[ -n "${PREV}" ]]; then
+    CHANGES="$(git -C "${REPO_ROOT}" log --no-merges --pretty='- %s' "${PREV}..${TARGET}" || true)"
 fi
 if [[ -z "${CHANGES}" ]]; then
     CHANGES="- First public release of Daftar."
