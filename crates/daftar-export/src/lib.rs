@@ -4,6 +4,7 @@
 pub mod archive;
 pub mod batch;
 pub mod cards;
+pub mod document_pdf;
 pub mod error;
 pub mod pdf;
 
@@ -14,6 +15,10 @@ pub use archive::{
 pub use batch::{BatchReport, export_cards_png_directory, export_cards_png_zip};
 pub use cards::{
     CardContent, CardKind, CardLayout, CardStyle, layout_card, render_card_png, save_card_png,
+};
+pub use document_pdf::{
+    DocumentPdfOptions, DocumentPdfReport, PdfMargins, PdfOrientation, PdfPageFormat,
+    export_document_pdf,
 };
 pub use error::ExportError;
 pub use pdf::{CardsPerPage, PaperSize, PdfOptions, PdfReport, export_cards_pdf};

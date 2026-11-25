@@ -14,6 +14,7 @@ daftar-store = { workspace = true }
 rusqlite = { workspace = true }
 tiny-skia = { workspace = true }
 resvg = { workspace = true }
+flate2 = { workspace = true }
 pdf-writer = { workspace = true }
 subsetter = { workspace = true }
 ttf-parser = { workspace = true }

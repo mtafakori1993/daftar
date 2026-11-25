@@ -12,15 +12,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use daftar_core::direction::{Direction, ResolvedDirection};
+use daftar_core::direction::Direction;
 use daftar_core::markdown::{Block, MdDocument, RichText};
 use daftar_core::settings::TextAlign;
-use daftar_text::{LayoutOptions, ShapedText, SpanStyle, TextEngine, shape_rich};
+use daftar_core::markdown::SpanStyle;
+use daftar_text::{LayoutOptions, ShapedText, TextEngine, shape_rich};
 use pdf_writer::types::{CidFontType, FontFlags, SystemInfo};
 use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 use ttf_parser::{Face, GlyphId};
 
-use crate::{ExportError, Result};
+use crate::error::{ExportError, Result};
 
 /// Page formats in points (1/72 inch).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -145,6 +146,9 @@ pub struct DocumentPdfOptions {
     pub paragraph_spacing: f32,
     pub code_font_family: String,
     pub code_font_size: f32,
+    /// Font used for page chrome (page numbers, header, footer, cover metadata): a Latin
+    /// face so digits, slashes and separators always have glyphs.
+    pub chrome_font_family: String,
     // Layout
     /// Text column width in points; `0` uses the full area between the margins.
     pub content_width: f32,
@@ -156,6 +160,8 @@ pub struct DocumentPdfOptions {
     pub header_text: String,
     pub footer_text: String,
     pub show_source: bool,
+    /// Label used for the table-of-contents heading.
+    pub toc_label: String,
     // Content
     pub include_code: bool,
     pub include_tables: bool,
@@ -179,6 +185,7 @@ impl Default for DocumentPdfOptions {
             paragraph_spacing: 6.0,
             code_font_family: "JetBrains Mono".to_string(),
             code_font_size: 9.0,
+            chrome_font_family: "Inter".to_string(),
             content_width: 0.0,
             direction_rtl: None,
             show_title: true,
@@ -187,6 +194,7 @@ impl Default for DocumentPdfOptions {
             header_text: String::new(),
             footer_text: String::new(),
             show_source: true,
+            toc_label: "Contents".to_string(),
             include_code: true,
             include_tables: true,
             include_images: true,
@@ -260,6 +268,21 @@ enum TextRole {
     Caption,
 }
 
+/// Text colour for a role.
+///
+/// Fill colour is part of the content stream state and survives background rectangles, so
+/// every text run sets its own colour explicitly.
+fn role_color(role: TextRole) -> [u8; 3] {
+    match role {
+        TextRole::Title | TextRole::Heading(_) => [17, 17, 17],
+        TextRole::Body => [30, 30, 30],
+        TextRole::Code => [36, 41, 46],
+        TextRole::Quote => [64, 64, 70],
+        TextRole::Toc => [70, 70, 76],
+        TextRole::Subtitle | TextRole::Caption => [120, 120, 126],
+    }
+}
+
 struct TextFlow {
     run: ShapedRun,
     role: TextRole,
@@ -286,10 +309,13 @@ enum Flow {
     },
     Image {
         path: PathBuf,
+        /// Rendered RGB samples and size, resolved before pagination.
+        raster: RasterImage,
         space_after: f32,
     },
     Diagram {
         source: String,
+        raster: RasterImage,
         space_after: f32,
     },
 }
@@ -299,6 +325,7 @@ enum Placed {
     Text {
         run: ShapedRun,
         lines: Range<usize>,
+        role: TextRole,
         top: f32,
         background: Option<[u8; 3]>,
         accent: Option<[u8; 3]>,
@@ -320,14 +347,15 @@ enum Placed {
         x: f32,
     },
     Image {
-        path: PathBuf,
+        /// Index into the embedded image list.
+        image: usize,
         x: f32,
         top: f32,
         width: f32,
         height: f32,
     },
     Diagram {
-        source: String,
+        image: usize,
         x: f32,
         top: f32,
         width: f32,
@@ -337,6 +365,155 @@ enum Placed {
 
 struct Page {
     items: Vec<Placed>,
+}
+
+/// Rendered RGBA samples for an embedded image or diagram.
+#[derive(Clone)]
+struct RasterImage {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+impl RasterImage {
+    fn is_empty(&self) -> bool {
+        self.width == 0 || self.height == 0 || self.rgba.len() < 4
+    }
+
+    /// Physical size in points for a target width, preserving the aspect ratio.
+    fn size_for_width(&self, width: f32) -> (f32, f32) {
+        if self.width == 0 || self.height == 0 {
+            return (width, width * 0.5);
+        }
+        let aspect = self.height as f32 / self.width as f32;
+        (width, width * aspect)
+    }
+}
+
+/// An image XObject written into the PDF.
+struct EmbeddedImage {
+    name: &'static [u8],
+    data_ref: Ref,
+    smask_ref: Option<Ref>,
+    width: u32,
+    height: u32,
+}
+
+/// Decode a raster or SVG file to RGBA samples.
+fn load_raster(path: &Path, max_side: u32) -> std::result::Result<RasterImage, String> {
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext == "svg" {
+        return load_svg_raster(path, max_side);
+    }
+    let decoded = image::open(path).map_err(|error| format!("Cannot open image: {error}"))?;
+    let decoded = decoded.to_rgba8();
+    let (width, height) = decoded.dimensions();
+    if width == 0 || height == 0 {
+        return Err("Image has no size".into());
+    }
+    let (width, height, rgba) = if width.max(height) <= max_side {
+        (width, height, decoded.into_raw())
+    } else {
+        let scale = max_side as f32 / width.max(height) as f32;
+        let new_w = (width as f32 * scale).round().max(1.0) as u32;
+        let new_h = (height as f32 * scale).round().max(1.0) as u32;
+        let resized =
+            image::imageops::resize(&decoded, new_w, new_h, image::imageops::FilterType::Lanczos3);
+        (new_w, new_h, resized.into_raw())
+    };
+    Ok(RasterImage {
+        width,
+        height,
+        rgba,
+    })
+}
+
+fn load_svg_raster(path: &Path, max_side: u32) -> std::result::Result<RasterImage, String> {
+    let data = std::fs::read(path).map_err(|error| format!("Cannot read SVG: {error}"))?;
+    let mut fontdb = resvg::usvg::fontdb::Database::new();
+    fontdb.load_system_fonts();
+    for font in daftar_text::bundled_fonts() {
+        fontdb.load_font_data(font.bytes.to_vec());
+    }
+    let mut options = resvg::usvg::Options::default();
+    options.fontdb = std::sync::Arc::new(fontdb);
+    options.resources_dir = path.parent().map(|parent| parent.to_path_buf());
+    let tree = resvg::usvg::Tree::from_data(&data, &options)
+        .map_err(|error| format!("Invalid SVG: {error}"))?;
+    let size = tree.size();
+    let scale = (max_side as f32 / size.width().max(size.height())).min(1.0);
+    let width = (size.width() * scale).ceil().max(1.0) as u32;
+    let height = (size.height() * scale).ceil().max(1.0) as u32;
+    let mut pixmap = tiny_skia::Pixmap::new(width, height)
+        .ok_or_else(|| "Could not allocate SVG pixmap".to_string())?;
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    let rgba: Vec<u8> = pixmap
+        .pixels()
+        .iter()
+        .flat_map(|pixel| {
+            let color = pixel.demultiply();
+            [color.red(), color.green(), color.blue(), color.alpha()]
+        })
+        .collect();
+    Ok(RasterImage {
+        width,
+        height,
+        rgba,
+    })
+}
+
+/// Render a Mermaid diagram to RGBA samples through the native renderer.
+fn render_diagram_raster(
+    engine: &mut TextEngine,
+    source: &str,
+    scale: f32,
+) -> std::result::Result<RasterImage, String> {
+    let theme = daftar_diagram::DiagramTheme::light();
+    let built = daftar_diagram::build(source, &theme, engine).map_err(|error| error.to_string())?;
+    let png = built.encode_png(engine, scale)?;
+    let decoded = image::load_from_memory(&png)
+        .map_err(|error| format!("Cannot decode diagram: {error}"))?
+        .to_rgba8();
+    let (width, height) = decoded.dimensions();
+    Ok(RasterImage {
+        width,
+        height,
+        rgba: decoded.into_raw(),
+    })
+}
+
+/// Split RGBA samples into colour data plus an optional alpha channel, both Flate compressed.
+fn encode_image_streams(raster: &RasterImage) -> (Vec<u8>, Option<Vec<u8>>) {
+    use flate2::Compression;
+    use flate2::write::ZlibEncoder;
+    use std::io::Write;
+
+    let mut rgb = Vec::with_capacity((raster.width * raster.height * 3) as usize);
+    let mut alpha = Vec::with_capacity((raster.width * raster.height) as usize);
+    let mut has_alpha = false;
+    for pixel in raster.rgba.chunks_exact(4) {
+        rgb.extend_from_slice(&pixel[0..3]);
+        alpha.push(pixel[3]);
+        if pixel[3] != 255 {
+            has_alpha = true;
+        }
+    }
+    let compress = |bytes: &[u8]| -> Vec<u8> {
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        let _ = encoder.write_all(bytes);
+        encoder.finish().unwrap_or_default()
+    };
+    let rgb = compress(&rgb);
+    let alpha = if has_alpha { Some(compress(&alpha)) } else { None };
+    (rgb, alpha)
 }
 
 struct TocPlacement {
@@ -374,7 +551,7 @@ pub fn export_document_pdf(
         rtl,
         &mut warnings,
     );
-    if flows.is_empty() {
+    if document.blocks.is_empty() {
         return Err(ExportError::Data(
             "This document has no content to export.".into(),
         ));
@@ -390,7 +567,8 @@ pub fn export_document_pdf(
 
     let top = page_h - options.margins.top;
     let bottom = options.margins.bottom + 26.0;
-    let mut pages = paginate(&flows, top, bottom, column);
+    let mut rasters: Vec<RasterImage> = Vec::new();
+    let mut pages = paginate(&flows, top, bottom, column, &mut rasters);
     let cover_index = if cover {
         pages.insert(0, Page { items: Vec::new() });
         Some(0usize)
@@ -430,9 +608,9 @@ pub fn export_document_pdf(
             }
         }
     }
-    if fonts.is_empty() {
+    if fonts.is_empty() && rasters.is_empty() {
         return Err(ExportError::Pdf(
-            "No text was produced for the PDF export.".into(),
+            "No text or image was produced for the PDF export.".into(),
         ));
     }
 
@@ -463,9 +641,14 @@ pub fn export_document_pdf(
         );
         next += 5;
     }
-    let page_refs: Vec<Ref> = (0..pages.len()).map(|_| Ref::new(next)).collect();
+    let page_refs: Vec<Ref> = (0..pages.len())
+        .map(|index| Ref::new(next + index as i32))
+        .collect();
     next += pages.len() as i32;
-    let content_refs: Vec<Ref> = (0..pages.len()).map(|_| Ref::new(next)).collect();
+    let content_refs: Vec<Ref> = (0..pages.len())
+        .map(|index| Ref::new(next + index as i32))
+        .collect();
+    next += pages.len() as i32;
 
     // Embedded fonts.
     for id in font_ids.iter() {
@@ -546,6 +729,43 @@ pub fn export_document_pdf(
         pdf.stream(cmap_ref, cmap.as_bytes()).finish();
     }
 
+    // Embedded images (raster photos and rendered diagrams).
+    let mut embedded: Vec<EmbeddedImage> = Vec::with_capacity(rasters.len());
+    for raster in rasters.iter() {
+        let name: &'static [u8] =
+            Box::leak(format!("Im{}", embedded.len() + 1).into_bytes().into_boxed_slice());
+        let data_ref = Ref::new(next);
+        next += 1;
+        let (rgb, alpha) = encode_image_streams(raster);
+        let smask_ref = alpha.map(|alpha| {
+            let smask = Ref::new(next);
+            next += 1;
+            let mut stream = pdf.image_xobject(smask, &alpha);
+            stream.width(raster.width as i32);
+            stream.height(raster.height as i32);
+            stream.color_space().device_gray();
+            stream.bits_per_component(8);
+            stream.finish();
+            smask
+        });
+        let mut stream = pdf.image_xobject(data_ref, &rgb);
+        stream.width(raster.width as i32);
+        stream.height(raster.height as i32);
+        stream.color_space().device_rgb();
+        stream.bits_per_component(8);
+        if let Some(smask) = smask_ref {
+            stream.s_mask(smask);
+        }
+        stream.finish();
+        embedded.push(EmbeddedImage {
+            name,
+            data_ref,
+            smask_ref,
+            width: raster.width,
+            height: raster.height,
+        });
+    }
+
     // Page contents.
     for (index, page) in pages.iter().enumerate() {
         let mut content = Content::new();
@@ -569,6 +789,7 @@ pub fn export_document_pdf(
                     flow.accent,
                     flow.indent,
                     Column { x: options.margins.left + flow.indent, width: column - flow.indent },
+                    role_color(flow.role),
                     &font_refs,
                 );
                 cursor -= flow.run.height() + flow.space_after;
@@ -592,13 +813,14 @@ pub fn export_document_pdf(
                             x: options.margins.left + flow.indent,
                             width: column - flow.indent,
                         },
+                        role_color(flow.role),
                         &font_refs,
                     );
                     cursor -= flow.run.height() + flow.space_after;
                 }
             }
         } else {
-            draw_page_items(&mut content, engine, page, page_h, &font_refs);
+            draw_page_items(&mut content, engine, page, page_h, &font_refs, &embedded);
         }
         draw_chrome(
             &mut content,
@@ -624,31 +846,51 @@ pub fn export_document_pdf(
         page.contents(content_refs[index]);
         {
             let mut resources = page.resources();
-            let mut fonts_dict = resources.fonts();
-            for id in font_ids.iter() {
-                let name = font_refs[id].resource_name;
-                let type0 = font_refs[id].type0;
-                fonts_dict.pair(Name(name), type0);
+            {
+                let mut fonts_dict = resources.fonts();
+                for id in font_ids.iter() {
+                    let name = font_refs[id].resource_name;
+                    let type0 = font_refs[id].type0;
+                    fonts_dict.pair(Name(name), type0);
+                }
+                fonts_dict.finish();
             }
-            fonts_dict.finish();
+            if !embedded.is_empty() {
+                let mut xobjects = resources.x_objects();
+                for image in &embedded {
+                    xobjects.pair(Name(image.name), image.data_ref);
+                }
+                xobjects.finish();
+            }
         }
         page.finish();
     }
-    pdf.pages(pages_ref).kids(page_refs.iter().copied()).finish();
-    let mut catalog = pdf.catalog(catalog_ref);
-    catalog.pages(pages_ref).finish();
-    let mut info = pdf.document_info(info_ref);
-    let title = document
-        .title
-        .clone()
-        .unwrap_or_else(|| "Daftar document".to_string());
-    let title_bytes: &'static [u8] = Box::leak(title.into_bytes().into_boxed_slice());
-    info.title(TextStr(
-        std::str::from_utf8(title_bytes).unwrap_or("Daftar document"),
-    ));
-    info.creator(TextStr("Daftar"));
-    info.producer(TextStr("Daftar native PDF writer"));
-    info.finish();
+    {
+        // `/Count` is required by real PDF consumers (poppler and most viewers reject a
+        // page tree without it, even though lax parsers accept the file).
+        let mut pages_tree = pdf.pages(pages_ref);
+        pages_tree.kids(page_refs.iter().copied());
+        pages_tree.count(page_refs.len() as i32);
+        pages_tree.finish();
+    }
+    {
+        let mut catalog = pdf.catalog(catalog_ref);
+        catalog.pages(pages_ref).finish();
+    }
+    {
+        let title = document
+            .title
+            .clone()
+            .unwrap_or_else(|| "Daftar document".to_string());
+        let title_bytes: &'static [u8] = Box::leak(title.into_bytes().into_boxed_slice());
+        let mut info = pdf.document_info(info_ref);
+        info.title(TextStr(
+            std::str::from_utf8(title_bytes).unwrap_or("Daftar document"),
+        ));
+        info.creator(TextStr("Daftar"));
+        info.producer(TextStr("Daftar native PDF writer"));
+        info.finish();
+    }
 
     let bytes = pdf.finish();
     std::fs::write(output.as_ref(), &bytes)?;
@@ -676,20 +918,28 @@ fn normalize(options: &DocumentPdfOptions) -> DocumentPdfOptions {
 // ---------------------------------------------------------------------------------------------
 
 fn base_layout(options: &DocumentPdfOptions, size: f32, weight: u16, rtl: bool) -> LayoutOptions {
+    base_layout_with_family(options, &options.font_family, size, weight, rtl)
+}
+
+fn base_layout_with_family(
+    options: &DocumentPdfOptions,
+    family: &str,
+    size: f32,
+    weight: u16,
+    rtl: bool,
+) -> LayoutOptions {
     LayoutOptions {
         width: 0.0,
-        family: options.font_family.clone(),
+        family: family.to_string(),
         size,
         weight,
         line_height: options.line_height,
         letter_spacing: 0.0,
         align: TextAlign::Start,
         align_start_rtl: rtl,
-        paragraph_direction: Some(if rtl {
-            ResolvedDirection::Rtl
-        } else {
-            ResolvedDirection::Ltr
-        }),
+        // `None` applies the Unicode first-strong rule per paragraph so that Latin runs
+        // (code, URLs, file names) keep their direction inside Persian text and vice versa.
+        paragraph_direction: None,
         code_family: options.code_font_family.clone(),
         code_size: options.code_font_size,
         wrap: true,
@@ -717,6 +967,7 @@ fn shape_rich_text(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn shape_plain(
     engine: &mut TextEngine,
     text: &str,
@@ -728,9 +979,69 @@ fn shape_plain(
     rtl: bool,
     code: bool,
 ) -> ShapedRun {
+    shape_plain_with_family(
+        engine,
+        text,
+        style,
+        options,
+        &options.font_family,
+        width,
+        size,
+        weight,
+        rtl,
+        code,
+    )
+}
+
+/// Shape a run with an explicit font family (used for Latin page chrome).
+#[allow(clippy::too_many_arguments)]
+fn shape_plain_with_family(
+    engine: &mut TextEngine,
+    text: &str,
+    style: SpanStyle,
+    options: &DocumentPdfOptions,
+    family: &str,
+    width: f32,
+    size: f32,
+    weight: u16,
+    rtl: bool,
+    code: bool,
+) -> ShapedRun {
     let mut rich = RichText::new(0..text.len());
     rich.push(text, &style, 0..text.len());
-    shape_rich_text(engine, &rich, options, width, size, weight, rtl, code)
+    let mut opts = base_layout_with_family(options, family, size, weight, rtl);
+    opts.width = width.max(40.0);
+    opts.base_code = code;
+    ShapedRun {
+        shaped: shape_rich(&mut engine.fonts, &rich, &opts),
+        text: rich.text.clone(),
+    }
+}
+
+/// Shape a run of page chrome (page numbers, headers, footers, cover metadata).
+#[allow(clippy::too_many_arguments)]
+fn shape_chrome(
+    engine: &mut TextEngine,
+    text: &str,
+    options: &DocumentPdfOptions,
+    width: f32,
+    size: f32,
+    weight: u16,
+    rtl: bool,
+) -> ShapedRun {
+    let family = options.chrome_font_family.clone();
+    shape_plain_with_family(
+        engine,
+        text,
+        SpanStyle::default(),
+        options,
+        &family,
+        width,
+        size,
+        weight,
+        rtl,
+        false,
+    )
 }
 
 fn heading_size(options: &DocumentPdfOptions, level: u8) -> f32 {
@@ -826,25 +1137,32 @@ fn build_blocks(
                     } else {
                         "•".to_string()
                     };
-                    let marker = shape_plain(
-                        engine,
-                        &marker_text,
-                        SpanStyle::default(),
-                        options,
-                        60.0,
-                        options.font_size,
-                        400,
-                        rtl,
-                        false,
-                    );
-                    let marker_width = marker.shaped.width.max(options.font_size * 0.7) + 6.0;
+                    let marker_width = options.font_size * 1.1;
                     let mut first = true;
                     for inner in &item.blocks {
                         match inner {
                             Block::Paragraph { text, .. } => {
+                                // The marker is part of the text so it follows the paragraph
+                                // direction: right of the first word in RTL, left in LTR.
+                                let mut rich = RichText::new(text.source_range.clone());
+                                if first {
+                                    rich.push(
+                                        &format!("{marker_text}  "),
+                                        &SpanStyle::default(),
+                                        text.source_range.clone(),
+                                    );
+                                }
+                                rich.push(
+                                    &text.text,
+                                    &SpanStyle::default(),
+                                    text.source_range.clone(),
+                                );
+                                for span in &text.spans {
+                                    rich.spans.push(span.clone());
+                                }
                                 let run = shape_rich_text(
                                     engine,
-                                    text,
+                                    &rich,
                                     options,
                                     (width - marker_width).max(60.0),
                                     options.font_size,
@@ -864,7 +1182,7 @@ fn build_blocks(
                                     },
                                     background: None,
                                     accent: None,
-                                    marker: if first { Some(marker.clone()) } else { None },
+                                    marker: None,
                                 })));
                             }
                             other => build_blocks(
@@ -880,6 +1198,26 @@ fn build_blocks(
                             ),
                         }
                         first = false;
+                    }
+                }
+            }
+            // Mermaid diagrams arrive as fenced code blocks with the `mermaid` info string.
+            Block::Code { language, code, .. }
+                if language
+                    .as_deref()
+                    .is_some_and(|lang| lang.eq_ignore_ascii_case("mermaid")) =>
+            {
+                if !options.include_diagrams {
+                    continue;
+                }
+                match render_diagram_raster(engine, code, 2.0) {
+                    Ok(raster) => flows.push(Flow::Diagram {
+                        source: code.clone(),
+                        raster,
+                        space_after: options.paragraph_spacing,
+                    }),
+                    Err(error) => {
+                        warnings.push(format!("Diagram skipped: {error}"));
                     }
                 }
             }
@@ -990,10 +1328,14 @@ fn build_blocks(
                     continue;
                 }
                 match resolve_image_path(&image.src, source_path, &options.base_dir) {
-                    Some(path) => flows.push(Flow::Image {
-                        path,
-                        space_after: options.paragraph_spacing,
-                    }),
+                    Some(path) => match load_raster(&path, 1600) {
+                        Ok(raster) => flows.push(Flow::Image {
+                            path,
+                            raster,
+                            space_after: options.paragraph_spacing,
+                        }),
+                        Err(error) => warnings.push(format!("Image skipped: {error}")),
+                    },
                     None => warnings.push(format!(
                         "Image skipped (not found or remote): {}",
                         image.src
@@ -1061,7 +1403,13 @@ fn resolve_image_path(dest: &str, source_path: &Path, base_dir: &Path) -> Option
 // Pagination
 // ---------------------------------------------------------------------------------------------
 
-fn paginate(flows: &[Flow], top: f32, bottom: f32, column: f32) -> Vec<Page> {
+fn paginate(
+    flows: &[Flow],
+    top: f32,
+    bottom: f32,
+    column: f32,
+    rasters: &mut Vec<RasterImage>,
+) -> Vec<Page> {
     let mut pages: Vec<Page> = vec![Page { items: Vec::new() }];
     let mut cursor = top;
 
@@ -1096,6 +1444,7 @@ fn paginate(flows: &[Flow], top: f32, bottom: f32, column: f32) -> Vec<Page> {
                     pages.last_mut().unwrap().items.push(Placed::Text {
                         run: text.run.clone(),
                         lines: index..end,
+                        role: text.role,
                         top: cursor - used,
                         background: text.background,
                         accent: text.accent,
@@ -1160,13 +1509,25 @@ fn paginate(flows: &[Flow], top: f32, bottom: f32, column: f32) -> Vec<Page> {
                 }
                 cursor -= space_after;
             }
-            Flow::Image { path, space_after } => {
-                let (w, h) = image_size(path, column).unwrap_or((column, column * 0.55));
+            Flow::Image {
+                raster,
+                space_after,
+                ..
+            } => {
+                if raster.is_empty() {
+                    continue;
+                }
+                let index = rasters.len();
+                rasters.push(raster.clone());
+                // Images never exceed the column width; tall images are capped to 1.6x the
+                // column so a full-page image still leaves room for a caption.
+                let (w, h) = raster.size_for_width(column);
+                let h = h.min(column * 1.6).max(20.0);
                 if cursor - h < bottom {
                     new_page!();
                 }
                 pages.last_mut().unwrap().items.push(Placed::Image {
-                    path: path.clone(),
+                    image: index,
                     x: 0.0,
                     top: cursor - h,
                     width: w,
@@ -1174,22 +1535,25 @@ fn paginate(flows: &[Flow], top: f32, bottom: f32, column: f32) -> Vec<Page> {
                 });
                 cursor -= h + space_after;
             }
-            Flow::Diagram {
-                source,
-                space_after,
-            } => {
-                let h = column * 0.62;
+            Flow::Diagram { raster, .. } => {
+                if raster.is_empty() {
+                    continue;
+                }
+                let index = rasters.len();
+                rasters.push(raster.clone());
+                let (w, h) = raster.size_for_width(column);
+                let h = h.min(column * 0.85).max(40.0);
                 if cursor - h < bottom {
                     new_page!();
                 }
                 pages.last_mut().unwrap().items.push(Placed::Diagram {
-                    source: source.clone(),
+                    image: index,
                     x: 0.0,
                     top: cursor - h,
-                    width: column,
+                    width: w,
                     height: h,
                 });
-                cursor -= h + space_after;
+                cursor -= h + 6.0;
             }
         }
     }
@@ -1216,7 +1580,7 @@ fn collect_toc(pages: &[Page]) -> Vec<TocPlacement> {
             if let Placed::Text {
                 run,
                 lines,
-                marker: None,
+                role: TextRole::Heading(level),
                 indent: 0.0,
                 ..
             } = item
@@ -1224,29 +1588,15 @@ fn collect_toc(pages: &[Page]) -> Vec<TocPlacement> {
                 if lines.start != 0 {
                     continue;
                 }
-                // Headings are the only zero-indent flows with a smaller following gap; the
-                // role is not stored on the page item, so headings are recovered from the
-                // document order recorded while building the flows.
-                if let Some(level) = heading_level_of(run) {
-                    placements.push(TocPlacement {
-                        level,
-                        text: run.text.clone(),
-                        page: index + 1,
-                    });
-                }
+                placements.push(TocPlacement {
+                    level: *level,
+                    text: run.text.clone(),
+                    page: index + 1,
+                });
             }
         }
     }
     placements
-}
-
-/// Headings are shaped at a larger size; recover the level from the run's size.
-fn heading_level_of(run: &ShapedRun) -> Option<u8> {
-    let size = run.shaped.lines.first()?.height;
-    if size <= 0.0 {
-        return None;
-    }
-    Some(size as u8 % 9)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1293,16 +1643,14 @@ fn build_cover(
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_default();
         if !label.is_empty() {
-            let run = shape_plain(
+            let run = shape_chrome(
                 engine,
                 &label,
-                SpanStyle::default(),
                 options,
                 column,
                 (options.font_size * 0.85).clamp(6.0, 14.0),
                 400,
                 rtl,
-                false,
             );
             flows.push(TextFlow {
                 run,
@@ -1319,16 +1667,14 @@ fn build_cover(
             "{} words · about {} min read",
             document.word_count, document.reading_minutes
         );
-        let run = shape_plain(
+        let run = shape_chrome(
             engine,
             &meta,
-            SpanStyle::default(),
             options,
             column,
             (options.font_size * 0.85).clamp(6.0, 14.0),
             400,
             rtl,
-            false,
         );
         flows.push(TextFlow {
             run,
@@ -1353,16 +1699,14 @@ fn build_toc(
     placements: &[TocPlacement],
 ) -> Vec<TextFlow> {
     let mut flows = Vec::new();
-    let heading = shape_plain(
+    let heading = shape_chrome(
         engine,
-        crate::i18n_export("Contents"),
-        SpanStyle::default(),
+        &options.toc_label,
         options,
         column,
         (options.font_size * 1.3).clamp(9.0, 24.0),
         650,
         rtl,
-        false,
     );
     flows.push(TextFlow {
         run: heading,
@@ -1443,12 +1787,14 @@ fn draw_page_items(
     page: &Page,
     page_h: f32,
     font_refs: &std::collections::HashMap<fontdb::ID, FontRefs>,
+    embedded: &[EmbeddedImage],
 ) {
     for item in &page.items {
         match item {
             Placed::Text {
                 run,
                 lines,
+                role,
                 top,
                 background,
                 accent,
@@ -1472,6 +1818,7 @@ fn draw_page_items(
                         x,
                         width: *width,
                     },
+                    role_color(*role),
                     font_refs,
                 );
                 if let Some(marker) = marker {
@@ -1487,6 +1834,7 @@ fn draw_page_items(
                         None,
                         0.0,
                         Column { x: 0.0, width: 40.0 },
+                        role_color(TextRole::Body),
                         font_refs,
                     );
                 }
@@ -1532,28 +1880,36 @@ fn draw_page_items(
                             x: cx + 5.0,
                             width,
                         },
+                        role_color(TextRole::Body),
                         font_refs,
                     );
                     cx += width + 10.0;
                 }
             }
             Placed::Image {
-                path,
+                image,
                 x,
                 top,
                 width,
                 height,
-            } => {
-                draw_raster_image(content, path, *x, page_h - *top - *height, *width, *height);
             }
-            Placed::Diagram {
-                source,
+            | Placed::Diagram {
+                image,
                 x,
                 top,
                 width,
                 height,
             } => {
-                draw_diagram(content, engine, source, *x, page_h - *top - *height, *width, *height);
+                if let Some(entry) = embedded.get(*image) {
+                    draw_embedded_image(
+                        content,
+                        entry,
+                        *x,
+                        page_h - *top - *height,
+                        *width,
+                        *height,
+                    );
+                }
             }
         }
     }
@@ -1572,6 +1928,7 @@ fn draw_run(
     accent: Option<[u8; 3]>,
     indent: f32,
     column: Column,
+    color: [u8; 3],
     font_refs: &std::collections::HashMap<fontdb::ID, FontRefs>,
 ) {
     let slice = run.shaped.lines.get(lines.clone()).unwrap_or(&[]);
@@ -1595,6 +1952,7 @@ fn draw_run(
         content.fill_nonzero();
     }
     content.begin_text();
+    set_fill(content, color);
     for line in slice {
         for glyph in &line.glyphs {
             if glyph.glyph_id == 0 {
@@ -1615,30 +1973,20 @@ fn draw_run(
     let _ = engine;
 }
 
-/// Draw an embedded raster image scaled into the given box.
-fn draw_raster_image(
+/// Draw an embedded image scaled into the given box.
+fn draw_embedded_image(
     content: &mut Content,
-    path: &Path,
+    image: &EmbeddedImage,
     x: f32,
     y: f32,
     width: f32,
     height: f32,
 ) {
-    let _ = (path, x, y, width, height);
-    // Image XObjects are added in `embed_document_images` before the pages are written.
-}
-
-/// Draw a Mermaid diagram rasterized through the native renderer.
-fn draw_diagram(
-    content: &mut Content,
-    engine: &mut TextEngine,
-    source: &str,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-) {
-    let _ = (content, engine, source, x, y, width, height);
+    let _ = (&image.data_ref, image.smask_ref, image.width, image.height);
+    content.save_state();
+    content.transform([width, 0.0, 0.0, height, x, y]);
+    content.x_object(Name(image.name));
+    content.restore_state();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1658,17 +2006,7 @@ fn draw_chrome(
     let small = (options.font_size * 0.78).clamp(5.0, 12.0);
     let baseline = options.margins.bottom * 0.45;
     if !options.header_text.is_empty() && index > 0 {
-        let run = shape_plain(
-            engine,
-            &options.header_text,
-            SpanStyle::default(),
-            options,
-            page_w,
-            small,
-            400,
-            rtl,
-            false,
-        );
+        let run = shape_chrome(engine, &options.header_text, options, page_w, small, 400, rtl);
         let x = if rtl {
             page_w - options.margins.right - run.shaped.width
         } else {
@@ -1686,21 +2024,12 @@ fn draw_chrome(
             None,
             0.0,
             Column { x, width: run.shaped.width },
+            role_color(TextRole::Caption),
             font_refs,
         );
     }
     if !options.footer_text.is_empty() && index > 0 {
-        let run = shape_plain(
-            engine,
-            &options.footer_text,
-            SpanStyle::default(),
-            options,
-            page_w,
-            small,
-            400,
-            rtl,
-            false,
-        );
+        let run = shape_chrome(engine, &options.footer_text, options, page_w, small, 400, rtl);
         let x = if rtl {
             page_w - options.margins.right - run.shaped.width
         } else {
@@ -1718,22 +2047,13 @@ fn draw_chrome(
             None,
             0.0,
             Column { x, width: run.shaped.width },
+            role_color(TextRole::Caption),
             font_refs,
         );
     }
     if options.show_page_numbers && total > 1 {
         let label = format!("{} / {}", index + 1, total);
-        let run = shape_plain(
-            engine,
-            &label,
-            SpanStyle::default(),
-            options,
-            page_w,
-            small,
-            400,
-            false,
-            false,
-        );
+        let run = shape_chrome(engine, &label, options, page_w, small, 400, false);
         let x = if rtl {
             options.margins.left
         } else {
@@ -1751,6 +2071,7 @@ fn draw_chrome(
             None,
             0.0,
             Column { x, width: run.shaped.width },
+            role_color(TextRole::Caption),
             font_refs,
         );
     }
@@ -1759,17 +2080,7 @@ fn draw_chrome(
             .title
             .clone()
             .unwrap_or_else(|| "Daftar".to_string());
-        let run = shape_plain(
-            engine,
-            &label,
-            SpanStyle::default(),
-            options,
-            page_w,
-            small,
-            400,
-            rtl,
-            false,
-        );
+        let run = shape_chrome(engine, &label, options, page_w, small, 400, rtl);
         let x = if rtl {
             options.margins.left
         } else {
@@ -1787,6 +2098,7 @@ fn draw_chrome(
             None,
             0.0,
             Column { x, width: run.shaped.width },
+            role_color(TextRole::Caption),
             font_refs,
         );
     }
@@ -1812,6 +2124,7 @@ fn set_stroke(content: &mut Content, color: [u8; 3]) {
 // Fonts
 // ---------------------------------------------------------------------------------------------
 
+#[derive(Clone, Copy)]
 struct FontRefs {
     type0: Ref,
     cid: Ref,
@@ -1913,4 +2226,265 @@ fn build_to_unicode(cmap: &BTreeMap<u16, Vec<char>>) -> String {
     }
     out.push_str("endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n");
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use daftar_core::markdown::parse_markdown;
+
+    fn engine() -> TextEngine {
+        TextEngine::new(None, "fa-IR")
+    }
+
+    fn export(source: &str, options: DocumentPdfOptions) -> (DocumentPdfReport, Vec<u8>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("document.pdf");
+        let document = parse_markdown(source);
+        let mut engine = engine();
+        let report = export_document_pdf(&mut engine, &document, Path::new("notes/test.md"), &options, &path)
+            .expect("export succeeds");
+        let bytes = std::fs::read(&path).unwrap();
+        (report, bytes, dir)
+    }
+
+    /// Extract the text of every page separately (page order), as a PDF viewer would.
+    fn extracted(path_dir: &Path, bytes: &[u8]) -> String {
+        let path = path_dir.join("document.pdf");
+        std::fs::write(&path, bytes).unwrap();
+        let doc = lopdf::Document::load(&path).unwrap();
+        let mut pages: Vec<u32> = doc.get_pages().keys().copied().collect();
+        pages.sort_unstable();
+        pages
+            .into_iter()
+            .map(|page| {
+                doc.extract_text(&[page])
+                    .unwrap_or_else(|error| format!("<extract error: {error}>"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn exports_a_valid_english_pdf() {
+        let source = "# Title\n\nHello world with a [link](https://example.com).\n\n- one\n- two\n\n> quoted\n";
+        let (report, bytes, dir) = export(source, DocumentPdfOptions::default());
+        assert!(report.pages >= 2, "expected a cover page plus content");
+        assert!(bytes.starts_with(b"%PDF"));
+        let doc = lopdf::Document::load_mem(&bytes).unwrap();
+        assert!(doc.get_pages().len() >= 1);
+        let text = extracted(dir.path(), &bytes);
+        assert!(text.contains("Hello world"), "text: {text}");
+        assert!(text.contains("Title"));
+    }
+
+    #[test]
+    fn persian_text_is_shaped_and_extractable() {
+        let source = "# دفتر فارسی\n\nاین یک متن آزمایشی است.\n\n- مورد نخست\n- مورد دوم\n";
+        let (report, bytes, dir) = export(source, DocumentPdfOptions::default());
+        assert!(report.pages >= 1);
+        let raw = extracted(dir.path(), &bytes);
+        // Persian comes back searchable and correctly ordered.
+        assert!(raw.contains("آزمایشی"), "text: {raw}");
+        assert!(raw.contains("دفتر"), "text: {raw}");
+        assert!(raw.contains("مورد نخست"), "text: {raw}");
+        assert!(raw.contains("مورد دوم"), "text: {raw}");
+        // Every Persian glyph resolves through ToUnicode: the document content extracts
+        // without replacement characters (page chrome uses Latin separators).
+        for line in raw.lines() {
+            let persian = line.chars().any(|c| ('\u{0600}'..='\u{06FF}').contains(&c));
+            if persian {
+                assert!(!line.contains('\u{FFFD}'), "unmapped glyph in content: {line:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn mixed_persian_and_english_keep_their_own_direction() {
+        let source = "# Mixed\n\nPersian فارسی and English together in one paragraph.\n";
+        let (_, bytes, dir) = export(source, DocumentPdfOptions::default());
+        let raw = extracted(dir.path(), &bytes);
+        // Latin runs keep their own direction inside the mixed paragraph.
+        assert!(raw.contains("Persian"), "text: {raw}");
+        assert!(raw.contains("English"), "text: {raw}");
+        // The Persian run is mapped glyph by glyph.
+        assert!(contains_script(&raw, "فارسی"), "text: {raw}");
+    }
+
+    #[test]
+    fn code_blocks_and_tables_are_rendered() {
+        let source = "# Code and table\n\n```rust\nfn main() { println!(\"hi\"); }\n```\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n";
+        let (report, bytes, dir) = export(source, DocumentPdfOptions::default());
+        assert!(report.warnings.is_empty(), "warnings: {:?}", report.warnings);
+        let text = extracted(dir.path(), &bytes);
+        assert!(text.contains("fn main"), "text: {text}");
+        assert!(text.contains('1') && text.contains('2'));
+    }
+
+    #[test]
+    fn embedded_images_are_written_as_xobjects() {
+        let dir = tempfile::tempdir().unwrap();
+        // A tiny PNG next to the "document".
+        let png_path = dir.path().join("picture.png");
+        let image = image::RgbaImage::from_pixel(8, 8, image::Rgba([200, 30, 30, 255]));
+        image.save(&png_path).unwrap();
+
+        let mut options = DocumentPdfOptions {
+            base_dir: dir.path().to_path_buf(),
+            ..Default::default()
+        };
+        options.show_title = true;
+        let (report, bytes, out) = export("![alt](picture.png)\n", options);
+        assert!(report.warnings.is_empty(), "warnings: {:?}", report.warnings);
+        let raw = String::from_utf8_lossy(&bytes);
+        assert!(raw.contains("/Subtype /Image"), "no image XObject in the PDF");
+        assert!(out.path().exists());
+    }
+
+    #[test]
+    fn mermaid_diagrams_are_embedded() {
+        let source = "# Diagram\n\n```mermaid\nflowchart LR\n  A[One] --> B[Two]\n```\n";
+        let (report, bytes, _dir) = export(source, DocumentPdfOptions::default());
+        assert!(report.warnings.is_empty(), "warnings: {:?}", report.warnings);
+        let raw = String::from_utf8_lossy(&bytes);
+        assert!(raw.contains("/Subtype /Image"), "diagram raster missing");
+    }
+
+    #[test]
+    fn page_format_orientation_and_margins_are_applied() {
+        let options = DocumentPdfOptions {
+            format: PdfPageFormat::A5,
+            orientation: PdfOrientation::Landscape,
+            margins: PdfMargins::uniform(20.0),
+            ..Default::default()
+        };
+        let (_, bytes, _dir) = export("# Small page\n\nText.\n", options);
+        let doc = lopdf::Document::load_mem(&bytes).unwrap();
+        let page_id = *doc.get_pages().values().next().unwrap();
+        let media = doc
+            .get_object(page_id)
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .get(b"MediaBox")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        let width = media[2].as_float().unwrap();
+        let height = media[3].as_float().unwrap();
+        let (a5_w, a5_h) = PdfPageFormat::A5.points();
+        assert!((width - a5_h).abs() < 1.0, "width {width}");
+        assert!((height - a5_w).abs() < 1.0, "height {height}");
+    }
+
+    #[test]
+    fn table_of_contents_lists_headings_with_page_numbers() {
+        let options = DocumentPdfOptions {
+            show_table_of_contents: true,
+            toc_label: "Contents".to_string(),
+            ..Default::default()
+        };
+        let source = "# One\n\nText\n\n## Two\n\nMore\n";
+        let (report, bytes, dir) = export(source, options);
+        assert!(report.pages >= 2);
+        let text = extracted(dir.path(), &bytes);
+        assert!(text.contains("Contents"), "text: {text}");
+        assert!(text.contains("One") && text.contains("Two"));
+    }
+
+    #[test]
+    fn missing_images_warn_instead_of_failing() {
+        let (report, bytes, _dir) = export("![missing](nope.png)\n", DocumentPdfOptions::default());
+        assert!(
+            report.warnings.iter().any(|w| w.contains("nope.png")),
+            "warnings: {:?}",
+            report.warnings
+        );
+        assert!(bytes.starts_with(b"%PDF"));
+    }
+
+    /// Characters of `word` present in `text` in any order.
+    ///
+    /// PDF content streams carry glyphs in visual order; an order-independent check still
+    /// proves that the `ToUnicode` map resolves every Persian glyph to its own code point
+    /// (without it the text would not be extractable at all).
+    fn contains_script(text: &str, word: &str) -> bool {
+        let mut pool: Vec<char> = text.chars().collect();
+        word.chars().all(|c| {
+            if let Some(index) = pool.iter().position(|p| *p == c) {
+                pool.remove(index);
+                true
+            } else {
+                false
+            }
+        })
+    }
+
+
+    #[test]
+    fn write_sample_pdf_for_inspection() {
+        if std::env::var("DAFTAR_WRITE_SAMPLE_PDF").is_err() {
+            return;
+        }
+        let sample = std::fs::read_to_string(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/english.md"),
+        )
+        .unwrap_or_else(|_| "# Sample\n\nHello.\n".to_string());
+        let base = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples"));
+        let document = parse_markdown(&sample);
+        let mut engine = engine();
+        let mut options = DocumentPdfOptions {
+            show_table_of_contents: true,
+            base_dir: base.to_path_buf(),
+            ..Default::default()
+        };
+        options.content_width = 0.0;
+        let out = std::path::Path::new("/tmp/kilo/daftar-sample.pdf");
+        let report = export_document_pdf(
+            &mut engine,
+            &document,
+            &base.join("english.md"),
+            &options,
+            out,
+        )
+        .unwrap();
+        let bytes = std::fs::read(out).unwrap();
+        let out = std::path::Path::new("/tmp/kilo/daftar-sample.pdf");
+        std::fs::write(out, &bytes).unwrap();
+        eprintln!(
+            "wrote {} ({} pages, {} bytes, {:?})",
+            out.display(),
+            report.pages,
+            bytes.len(),
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn empty_documents_are_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let document = MdDocument {
+            blocks: Vec::new(),
+            toc: Vec::new(),
+            title: None,
+            word_count: 0,
+            reading_minutes: 0,
+            footnotes: Vec::new(),
+            links: Vec::new(),
+            frontmatter: Default::default(),
+            direction_hint: None,
+            detected_direction: Direction::Ltr,
+            total_source_len: 0,
+        };
+        let mut engine = engine();
+        let error = export_document_pdf(
+            &mut engine,
+            &document,
+            Path::new("empty.md"),
+            &DocumentPdfOptions::default(),
+            dir.path().join("empty.pdf"),
+        )
+        .unwrap_err();
+        assert!(matches!(error, ExportError::Data(_)));
+    }
 }

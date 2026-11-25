@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"
@@ -20,6 +20,7 @@ repository = "https://example.invalid/daftar"
 description = "A native Rust Markdown reader and knowledge studio"
 
 [workspace.dependencies]
+flate2 = "1"
 daftar-core = { path = "crates/daftar-core" }
 daftar-text = { path = "crates/daftar-text" }
 daftar-diagram = { path = "crates/daftar-diagram" }
