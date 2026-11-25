@@ -74,6 +74,7 @@ const FA: &[(&str, &str)] = &[
     ("Add tag", "افزودن برچسب"),
     ("Add task", "افزودن کار"),
     ("Add URL", "افزودن نشانی"),
+    ("Adjust the filters or search query.", "پالایشها یا عبارت جستوجو را تغییر دهید."),
     ("Anchors survive file edits; unresolved anchors are kept, never silently deleted.", "لنگرها پس از ویرایش فایل باقی میمانند؛ لنگرهای حلنشده حفظ میشوند و هرگز بیدرخواست حذف نمیشوند."),
     ("Appearance", "ظاهر"),
     ("Archive", "بایگانی"),
@@ -91,6 +92,7 @@ const FA: &[(&str, &str)] = &[
     ("Checking missing documents", "بررسی سندهای گمشده"),
     ("Change library…", "تغییر کتابخانه…"),
     ("Clear", "پاک کردن"),
+    ("Clear filters", "پاک کردن پالایشها"),
     ("Code copied to clipboard.", "کد در بریدهدان رونوشت شد."),
     ("Code font", "قلم کد"),
     ("Collections", "مجموعهها"),
@@ -107,6 +109,7 @@ const FA: &[(&str, &str)] = &[
     ("Description and learning objectives…", "توضیح و اهداف یادگیری…"),
     ("Diagram rendering", "رندر نمودار"),
     ("Document", "سند"),
+    ("Double-click to open", "برای باز کردن، دو بار کلیک کنید"),
     ("Duplicate documents", "اسناد تکراری"),
     ("Duplicate theme", "تکثیر پوسته"),
     ("Edit note", "ویرایش یادداشت"),
@@ -160,6 +163,7 @@ const FA: &[(&str, &str)] = &[
     ("No collections yet.", "هنوز مجموعهای وجود ندارد."),
     ("No highlights yet", "هنوز برجستهای وجود ندارد"),
     ("No results", "نتیجهای یافت نشد"),
+    ("No matching documents", "سند مطابقی یافت نشد"),
     ("No roadmaps yet", "هنوز نقشهٔ راهی وجود ندارد"),
     ("Note saved.", "یادداشت ذخیره شد."),
     ("Notes", "یادداشتها"),
@@ -173,9 +177,11 @@ const FA: &[(&str, &str)] = &[
     ("Quote copied.", "نقلقول رونوشت شد."),
     ("Reading font", "قلم مطالعه"),
     ("Reading presets", "پیشتنظیمهای مطالعه"),
+    ("Reading progress", "پیشرفت مطالعه"),
     ("Reading theme", "پوستهٔ مطالعه"),
     ("Recent", "اخیر"),
     ("Recent documents", "اسناد اخیر"),
+    ("Recently opened", "اخیراً بازشده"),
     ("Reference", "مرجع"),
     ("Remember last document", "بهخاطر سپردن آخرین سند"),
     ("Remove from library", "حذف از کتابخانه"),
@@ -196,6 +202,9 @@ const FA: &[(&str, &str)] = &[
     ("Selection copied.", "انتخاب رونوشت شد."),
     ("Settings", "تنظیمات"),
     ("Show hidden", "نمایش پنهانها"),
+    ("Showing {} of {} documents", "نمایش {} از {} سند"),
+    ("Sort", "ترتیب"),
+    ("Sort order", "ترتیب مرتبسازی"),
     ("Some anchors could not be relocated after the file changed. They are kept in the database and shown here for review.", "برخی لنگرها پس از تغییر فایل جابهجا نشدند. آنها در پایگاه داده نگه داشته و برای بازبینی در همینجا نمایش داده میشوند."),
     ("Space flip · ←/→ navigate · L learned · R review · Esc exit", "Space ورقزدن · ←/→ جابهجایی · L یادگرفته · R مرور · Esc خروج"),
     ("Standard data directory", "پوشهٔ دادهٔ استاندارد"),
@@ -229,6 +238,7 @@ const FA: &[(&str, &str)] = &[
     ("Your note…", "یادداشت شما…"),
     ("egui/eframe · cosmic-text (HarfBuzz-class shaping + Unicode bidi) · rustybuzz · SQLite/FTS5 · syntect · tiny-skia · pdf-writer with embedded TrueType fonts.", "egui/eframe · cosmic-text (ترکیببندی در کلاس HarfBuzz + دوجهتهٔ یونیکد) · rustybuzz · SQLite/FTS5 · syntect · tiny-skia · pdf-writer با قلمهای TrueType جاسازیشده."),
     ("{:.0}% complete", "{}٪ کامل"),
+    ("{}%", "{}٪"),
     ("{:.0}% read · {} min", "{}٪ خواندهشده · {} دقیقه"),
     ("{:.0}% · {}/{} tasks · {} estimated", "{}٪ · {}/{} کار · {} تخمینی"),
     ("{} completed · {} in progress · {} not started · {} skipped", "{} انجامشده · {} در حال انجام · {} شروعنشده · {} ردشده"),
@@ -506,9 +516,15 @@ mod tests {
     fn templates_substitute_positionally() {
         set_language("fa");
         assert_eq!(tf("{} selected", &["3"]), "3 انتخابشده");
-        assert_eq!(tf("{} docs · {} highlights · {} cards", &["4", "2", "7"]), "4 سند · 2 برجسته · 7 کارت");
+        assert_eq!(
+            tf("{} docs · {} highlights · {} cards", &["4", "2", "7"]),
+            "4 سند · 2 برجسته · 7 کارت"
+        );
         set_language("en");
-        assert_eq!(tf("{} docs · {} highlights · {} cards", &["4", "2", "7"]), "4 docs · 2 highlights · 7 cards");
+        assert_eq!(
+            tf("{} docs · {} highlights · {} cards", &["4", "2", "7"]),
+            "4 docs · 2 highlights · 7 cards"
+        );
     }
 
     #[test]
@@ -531,6 +547,10 @@ mod tests {
         let before = keys.len();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(before, keys.len(), "duplicate keys in the translation table");
+        assert_eq!(
+            before,
+            keys.len(),
+            "duplicate keys in the translation table"
+        );
     }
 }
