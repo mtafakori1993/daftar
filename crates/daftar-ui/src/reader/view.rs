@@ -2187,7 +2187,7 @@ impl ReaderState {
                     ui.add_space(8.0);
                     ui.label(
                         RichText::new(crate::i18n::tf(
-                            "Direction: {} · Progress: {:.0}%",
+                            "Direction: {} · Progress: {}%",
                             &[
                                 if self.config.resolved_direction.is_rtl() { "RTL" } else { "LTR" },
                                 &format!("{:.0}", self.progress() * 100.0),

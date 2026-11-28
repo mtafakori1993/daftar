@@ -245,10 +245,10 @@ const FA: &[(&str, &str)] = &[
     ("Use Ctrl, Shift, Alt and a key name, for example `Ctrl+Shift+H`.", "از Ctrl، Shift، Alt و نام یک کلید استفاده کنید؛ مثلاً `Ctrl+Shift+H`."),
     ("Your note…", "یادداشت شما…"),
     ("egui/eframe · cosmic-text (HarfBuzz-class shaping + Unicode bidi) · rustybuzz · SQLite/FTS5 · syntect · tiny-skia · pdf-writer with embedded TrueType fonts.", "egui/eframe · cosmic-text (ترکیببندی در کلاس HarfBuzz + دوجهتهٔ یونیکد) · rustybuzz · SQLite/FTS5 · syntect · tiny-skia · pdf-writer با قلمهای TrueType جاسازیشده."),
-    ("{:.0}% complete", "{}٪ کامل"),
+    ("{}% complete", "{}٪ کامل"),
     ("{}%", "{}٪"),
-    ("{:.0}% read · {} min", "{}٪ خواندهشده · {} دقیقه"),
-    ("{:.0}% · {}/{} tasks · {} estimated", "{}٪ · {}/{} کار · {} تخمینی"),
+    ("{}% read · {} min", "{}٪ خواندهشده · {} دقیقه"),
+    ("{}% · {}/{} tasks · {} estimated", "{}٪ · {}/{} کار · {} تخمینی"),
     ("{} completed · {} in progress · {} not started · {} skipped", "{} انجامشده · {} در حال انجام · {} شروعنشده · {} ردشده"),
     ("{} docs · {} highlights · {} cards", "{} سند · {} برجسته · {} کارت"),
     ("{} est", "{} تخمینی"),
@@ -262,35 +262,35 @@ const FA: &[(&str, &str)] = &[
     ("Library location: {}", "مکان کتابخانه: {}"),
     ("Version {}", "نسخهٔ {}"),
     ("Backup written to {}", "پشتیبان در {} نوشته شد"),
-    ("Backup failed: {error}", "پشتیبانگیری شکست خورد: {}"),
-    ("Could not serialise settings: {error}", "سریالسازی تنظیمات ممکن نشد: {}"),
-    ("{message}  ({done}/{total})", "{}  ({}/{})"),
+    ("Backup failed: {}", "پشتیبانگیری شکست خورد: {}"),
+    ("Could not serialise settings: {}", "سریالسازی تنظیمات ممکن نشد: {}"),
+    ("{}  ({}/{})", "{}  ({}/{})"),
     ("Indexing finished with {} warning(s).", "نمایهسازی با {} هشدار پایان یافت."),
     ("Export complete: {}", "برونریزی کامل شد: {}"),
-    ("Export failed: {error}", "برونریزی شکست خورد: {}"),
-    ("Import failed: {error}", "درونریزی شکست خورد: {}"),
-    ("{job} failed: {error}", "{} شکست خورد: {}"),
-    ("{job} failed", "{} شکست خورد"),
-    ("Could not create Imported folder: {error}", "ساخت پوشهٔ Imported ممکن نشد: {}"),
-    ("Could not import {name}: {error}", "درونریزی {} ممکن نشد: {}"),
-    ("Imported {copied} Markdown file(s). Indexing…", "{} فایل Markdown درونریزی شد. در حال نمایهسازی…"),
-    ("Cannot open folder: {error}", "باز کردن پوشه ممکن نشد: {}"),
-    ("Added {count} file(s) from `{name}` into the library.", "{} فایل از «{}» به کتابخانه افزوده شد."),
-    ("Could not copy folder: {error}", "رونوشت پوشه ممکن نشد: {}"),
-    ("Could not add library: {error}", "افزودن کتابخانه ممکن نشد: {}"),
+    ("Export failed: {}", "برونریزی شکست خورد: {}"),
+    ("Import failed: {}", "درونریزی شکست خورد: {}"),
+    ("{} failed: {}", "{} شکست خورد: {}"),
+    ("{} failed", "{} شکست خورد"),
+    ("Could not create Imported folder: {}", "ساخت پوشهٔ Imported ممکن نشد: {}"),
+    ("Could not import {}: {}", "درونریزی {} ممکن نشد: {}"),
+    ("Imported {} Markdown file(s). Indexing…", "{} فایل Markdown درونریزی شد. در حال نمایهسازی…"),
+    ("Cannot open folder: {}", "باز کردن پوشه ممکن نشد: {}"),
+    ("Added {} file(s) from `{}` into the library.", "{} فایل از «{}» به کتابخانه افزوده شد."),
+    ("Could not copy folder: {}", "رونوشت پوشه ممکن نشد: {}"),
+    ("Could not add library: {}", "افزودن کتابخانه ممکن نشد: {}"),
     ("Image exported to {}", "تصویر در {} برونریزی شد"),
-    ("Could not write image: {error}", "نوشتن تصویر ممکن نشد: {}"),
-    ("Image export failed: {error}", "برونریزی تصویر شکست خورد: {}"),
+    ("Could not write image: {}", "نوشتن تصویر ممکن نشد: {}"),
+    ("Image export failed: {}", "برونریزی تصویر شکست خورد: {}"),
     ("Diagram exported to {}", "نمودار در {} برونریزی شد"),
-    ("Font `{name}` imported.", "قلم «{}» درونریزی شد."),
-    ("Invalid archive: {error}", "بایگانی نامعتبر: {}"),
-    ("Could not create collection: {error}", "ساخت مجموعه ممکن نشد: {}"),
-    ("Could not create category: {error}", "ساخت دسته ممکن نشد: {}"),
-    ("Could not create roadmap: {error}", "ساخت نقشهٔ راه ممکن نشد: {}"),
-    ("Could not save card: {error}", "ذخیرهٔ کارت ممکن نشد: {}"),
-    ("Cannot read folder: {error}", "خواندن پوشه ممکن نشد: {}"),
-    ("New folder {n}", "پوشهٔ جدید {}"),
-    ("Could not create folder: {error}", "ساخت پوشه ممکن نشد: {}"),
+    ("Font `{}` imported.", "قلم «{}» درونریزی شد."),
+    ("Invalid archive: {}", "بایگانی نامعتبر: {}"),
+    ("Could not create collection: {}", "ساخت مجموعه ممکن نشد: {}"),
+    ("Could not create category: {}", "ساخت دسته ممکن نشد: {}"),
+    ("Could not create roadmap: {}", "ساخت نقشهٔ راه ممکن نشد: {}"),
+    ("Could not save card: {}", "ذخیرهٔ کارت ممکن نشد: {}"),
+    ("Cannot read folder: {}", "خواندن پوشه ممکن نشد: {}"),
+    ("New folder {}", "پوشهٔ جدید {}"),
+    ("Could not create folder: {}", "ساخت پوشه ممکن نشد: {}"),
     ("Document not found.", "سند یافت نشد."),
     ("Folder is already inside the library. Re-indexing…", "پوشه از قبل داخل کتابخانه است؛ نمایهسازی دوباره…"),
     ("Library added.", "کتابخانه افزوده شد."),
@@ -340,7 +340,7 @@ const FA: &[(&str, &str)] = &[
     ("Daftar {} · archive format v{} · {} documents · {} attachments · {} words", "دفتر {} · قالب بایگانی نسخهٔ {} · {} سند · {} پیوست · {} واژه"),
     ("{} new document(s), {} already present. Archive size {}.", "{} سند جدید، {} از قبل موجود. حجم بایگانی {}."),
     ("{} documents · {} collections · {} categories · {} words indexed", "{} سند · {} مجموعه · {} دسته · {} واژه نمایهشده"),
-    ("Direction: {} · Progress: {:.0}%", "جهت: {} · پیشرفت: {}٪"),
+    ("Direction: {} · Progress: {}%", "جهت: {} · پیشرفت: {}٪"),
     ("Selection", "انتخاب"),
     ("All cards", "همهٔ کارتها"),
     ("BACK", "پشت"),
@@ -560,5 +560,23 @@ mod tests {
             keys.len(),
             "duplicate keys in the translation table"
         );
+    }
+
+    #[test]
+    fn template_keys_only_use_plain_placeholders() {
+        // `tf` substitutes literal `{}` positions; templates must not contain
+        // Rust format specs such as `{:.0}` which would leak into the interface.
+        for (source, _) in FA {
+            let chars: Vec<char> = source.chars().collect();
+            for (index, c) in chars.iter().enumerate() {
+                if *c == '{' {
+                    assert_eq!(
+                        chars.get(index + 1),
+                        Some(&'}'),
+                        "template `{source}` contains a format spec instead of a plain {{}}"
+                    );
+                }
+            }
+        }
     }
 }

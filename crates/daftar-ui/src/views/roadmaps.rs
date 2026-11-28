@@ -162,7 +162,7 @@ impl DaftarApp {
                     }
                     ui.add_space(6.0);
                     widgets::progress_bar(ui, palette, progress.percent / 100.0, palette.accent, 6.0);
-                    ui.label(egui::RichText::new(crate::i18n::tf("{:.0}% · {}/{} tasks · {} estimated", &[&format!("{:.0}", progress.percent), &progress.completed.to_string(), &progress.tasks.to_string(), &format_minutes(progress.estimated_minutes as u32)])).size(10.5).color(palette.text_secondary));
+                    ui.label(egui::RichText::new(crate::i18n::tf("{}% · {}/{} tasks · {} estimated", &[&format!("{:.0}", progress.percent), &progress.completed.to_string(), &progress.tasks.to_string(), &format_minutes(progress.estimated_minutes as u32)])).size(10.5).color(palette.text_secondary));
                 });
                 ui.add_space(6.0);
             }
@@ -211,7 +211,7 @@ impl DaftarApp {
         ui.add_space(6.0);
         widgets::progress_bar(ui, palette, self.roadmaps.progress.percent / 100.0, palette.accent, 7.0);
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(crate::i18n::tf("{:.0}% complete", &[&format!("{:.0}", self.roadmaps.progress.percent)])).size(11.5).color(palette.text_secondary));
+            ui.label(egui::RichText::new(crate::i18n::tf("{}% complete", &[&format!("{:.0}", self.roadmaps.progress.percent)])).size(11.5).color(palette.text_secondary));
             ui.label(egui::RichText::new(crate::i18n::tf("{} completed · {} in progress · {} not started · {} skipped", &[&self.roadmaps.progress.completed.to_string(), &self.roadmaps.progress.in_progress.to_string(), &self.roadmaps.progress.not_started.to_string(), &self.roadmaps.progress.skipped.to_string()])).size(10.5).color(palette.text_secondary));
             ui.label(egui::RichText::new(crate::i18n::tf("Estimated {} · actual {}", &[&format_minutes(self.roadmaps.progress.estimated_minutes as u32), &format_minutes(self.roadmaps.progress.actual_minutes as u32)])).size(10.5).color(palette.text_secondary));
         });

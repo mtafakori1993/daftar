@@ -132,7 +132,7 @@ impl DaftarApp {
                     widgets::meta_pill(ui, palette, "Portable", palette.accent);
                 }
                 if let Some(reader) = &self.reader {
-                    ui.label(egui::RichText::new(crate::i18n::tf("{:.0}% read · {} min", &[&format!("{:.0}", reader.progress() * 100.0), &reader.reading_minutes().to_string()])).size(10.5).color(palette.text_secondary));
+                    ui.label(egui::RichText::new(crate::i18n::tf("{}% read · {} min", &[&format!("{:.0}", reader.progress() * 100.0), &reader.reading_minutes().to_string()])).size(10.5).color(palette.text_secondary));
                 } else if let Some(library) = &self.library {
                     ui.label(egui::RichText::new(crate::i18n::tf("{} docs · {} highlights · {} cards", &[&self.stats.documents.to_string(), &self.stats.highlights.to_string(), &self.stats.flashcards.to_string()])).size(10.5).color(palette.text_secondary));
                     let _ = library;
