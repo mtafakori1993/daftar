@@ -98,6 +98,11 @@ struct DiagramViewer {
     title: String,
 }
 
+struct DiagramSourceDialog {
+    title: String,
+    source: String,
+}
+
 struct NoteDialog {
     selection: TextSelection,
     text: String,
@@ -132,6 +137,7 @@ pub struct ReaderState {
     image_textures: HashMap<PathBuf, Option<ImageTexture>>,
     side_tab: SideTab,
     diagram_viewer: Option<DiagramViewer>,
+    diagram_source: Option<DiagramSourceDialog>,
     note_dialog: Option<NoteDialog>,
     highlight_menu: Option<HighlightMenu>,
     width_menu_open: bool,
@@ -209,6 +215,7 @@ impl ReaderState {
             image_textures: HashMap::new(),
             side_tab: SideTab::Outline,
             diagram_viewer: None,
+            diagram_source: None,
             note_dialog: None,
             highlight_menu: None,
             width_menu_open: false,
@@ -1061,6 +1068,36 @@ impl ReaderState {
                                     egui::FontId::proportional(10.5),
                                     colors_ref.muted,
                                 );
+                                let source = self.diagrams.get(key).map(|e| e.source.clone());
+                                if let Some(source) = source {
+                                    let button_rect = Rect::from_min_size(
+                                        d_rect.min + vec2(34.0, d_rect.height() - 34.0),
+                                        vec2(130.0, 28.0),
+                                    );
+                                    let mut view_source = false;
+                                    ui.scope_builder(
+                                        egui::UiBuilder::new().max_rect(button_rect),
+                                        |ui| {
+                                            if widgets::button(
+                                                ui,
+                                                palette,
+                                                "View source",
+                                                Some(Icon::Eye),
+                                                ButtonVariant::Secondary,
+                                            )
+                                            .clicked()
+                                            {
+                                                view_source = true;
+                                            }
+                                        },
+                                    );
+                                    if view_source {
+                                        self.diagram_source = Some(DiagramSourceDialog {
+                                            title: self.doc.title.clone(),
+                                            source,
+                                        });
+                                    }
+                                }
                             } else {
                                 if let Some(tex) = ensure_diagram_texture(
                                     ui.ctx(),
@@ -1259,6 +1296,7 @@ impl ReaderState {
             });
         }
         self.show_diagram_viewer(ui.ctx(), engine, palette, &mut actions);
+        self.show_diagram_source(ui.ctx(), palette, &mut actions);
         self.show_note_dialog(ui.ctx(), palette, store, &mut actions);
         self.show_highlight_menu(ui.ctx(), palette, settings, store, &mut actions);
         actions
@@ -2018,6 +2056,73 @@ impl ReaderState {
         }
         if close {
             self.diagram_viewer = None;
+        }
+    }
+
+    /// Read-only viewer for the Mermaid source of a diagram that failed to render.
+    fn show_diagram_source(
+        &mut self,
+        ctx: &egui::Context,
+        palette: &Palette,
+        actions: &mut Vec<ReaderAction>,
+    ) {
+        let Some(dialog) = self.diagram_source.as_mut() else {
+            return;
+        };
+        let mut close = false;
+        let mut copied: Option<String> = None;
+        egui::Window::new(crate::i18n::t("Diagram source"))
+            .collapsible(false)
+            .resizable(true)
+            .default_width(560.0)
+            .default_height(420.0)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.direction(|ui| {
+                    ui.label(
+                        RichText::new(&dialog.title)
+                            .size(12.0)
+                            .color(palette.text_secondary),
+                    );
+                    ui.add_space(4.0);
+                    let mut buffer = dialog.source.clone();
+                    ui.add(
+                        egui::TextEdit::multiline(&mut buffer)
+                            .interactive(false)
+                            .code_editor()
+                            .desired_width(ui.available_width())
+                            .desired_rows(16),
+                    );
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if widgets::button(
+                            ui,
+                            palette,
+                            "Copy code",
+                            Some(Icon::Copy),
+                            ButtonVariant::Secondary,
+                        )
+                        .clicked()
+                        {
+                            copied = Some(dialog.source.clone());
+                        }
+                        if widgets::button(ui, palette, "Close", Some(Icon::Close), ButtonVariant::Quiet)
+                            .clicked()
+                        {
+                            close = true;
+                        }
+                    });
+                });
+            });
+        if let Some(source) = copied {
+            ctx.copy_text(source.clone());
+            actions.push(ReaderAction::Notice(
+                crate::i18n::t("Source copied.").into(),
+                ToastKind::Info,
+            ));
+        }
+        if close {
+            self.diagram_source = None;
         }
     }
 

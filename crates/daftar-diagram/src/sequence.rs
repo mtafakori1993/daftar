@@ -50,6 +50,7 @@ struct PendingFragment {
     sections: Vec<(Option<String>, Vec<RawItem>)>,
 }
 
+#[derive(Debug)]
 enum RawItem {
     Message {
         from: String,
@@ -68,6 +69,7 @@ enum RawItem {
     },
 }
 
+#[derive(Debug)]
 struct ParsedSequence {
     participants: Vec<Participant>,
     index: std::collections::HashMap<String, usize>,
@@ -244,13 +246,21 @@ pub fn build(
     }
 
     let mut cursor_y = lifeline_top + 8.0;
+    let numbers = if parsed.autonumber {
+        let count = count_messages(&items);
+        (1..=count)
+            .map(|i| factory.layout(&i.to_string(), 10.0, 600, 40.0, TextAlign::Center, None))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     draw_items(
         &mut scene,
         &items,
         &xs,
         &mut cursor_y,
         theme,
-        parsed.autonumber,
+        &numbers,
         &mut 0,
     );
 
@@ -565,13 +575,27 @@ fn measure_items(items: &[SeqItem]) -> f32 {
     total
 }
 
+/// Count rendered messages in draw order, so autonumber badges get sequential numbers.
+fn count_messages(items: &[SeqItem]) -> usize {
+    items
+        .iter()
+        .map(|item| match item {
+            SeqItem::Message { .. } => 1,
+            SeqItem::Note { .. } => 0,
+            SeqItem::Fragment { sections, .. } => {
+                sections.iter().map(|s| count_messages(&s.items)).sum()
+            }
+        })
+        .sum()
+}
+
 fn draw_items(
     scene: &mut crate::Scene,
     items: &[SeqItem],
     xs: &[f32],
     cursor_y: &mut f32,
     theme: &DiagramTheme,
-    autonumber: bool,
+    numbers: &[Label],
     message_no: &mut usize,
 ) {
     let left = xs.first().copied().unwrap_or(30.0) - 70.0;
@@ -587,9 +611,33 @@ fn draw_items(
             } => {
                 let x1 = xs.get(*from).copied().unwrap_or(left);
                 let x2 = xs.get(*to).copied().unwrap_or(right);
+                *message_no += 1;
+                let number = numbers.get(message_no.wrapping_sub(1));
                 if *self_message {
                     let y = *cursor_y + label.height + 6.0;
                     let lw = 54.0;
+                    let label_x = match number {
+                        Some(number) => {
+                            let badge_w = number.height + 8.0;
+                            let badge_cx = x1 + lw + badge_w * 0.5;
+                            scene.ellipse(
+                                badge_cx,
+                                *cursor_y + label.height * 0.5,
+                                badge_w * 0.5,
+                                badge_w * 0.5,
+                                Some(theme.accent),
+                                None,
+                            );
+                            scene.text(
+                                number.shaped.clone(),
+                                badge_cx - number.width * 0.5,
+                                *cursor_y + (label.height - number.height) * 0.5,
+                                theme.background,
+                            );
+                            x1 + lw + badge_w + 8.0
+                        }
+                        None => x1 + lw + 10.0,
+                    };
                     scene.path(
                         vec![
                             PathOp::Move(x1, y),
@@ -603,25 +651,49 @@ fn draw_items(
                         }),
                     );
                     scene.arrowhead((x1 + 18.0, y + 25.0), (x1 + 1.0, y + 26.0), theme.line, 8.0);
-                    scene.text(
-                        label.shaped.clone(),
-                        x1 + lw + 10.0,
-                        *cursor_y,
-                        theme.text,
-                    );
+                    scene.text(label.shaped.clone(), label_x, *cursor_y, theme.text);
                     *cursor_y += label.height + 54.0;
                 } else {
                     let center = (x1 + x2) * 0.5;
-                    let text_x = center - label.width * 0.5;
+                    let (text_x, badge_left) = match number {
+                        Some(number) => {
+                            let badge_w = number.height + 8.0;
+                            let total = badge_w + 8.0 + label.width;
+                            let combo_left = center - total * 0.5;
+                            (combo_left + badge_w + 8.0, Some(combo_left))
+                        }
+                        None => (center - label.width * 0.5, None),
+                    };
+                    // Backdrop hides the lifelines behind the label (and the badge).
+                    let backdrop_left = badge_left.unwrap_or(text_x) - 4.0;
                     scene.rect(
-                        text_x - 4.0,
+                        backdrop_left,
                         *cursor_y - 1.0,
-                        label.width + 8.0,
+                        (text_x + label.width + 4.0) - backdrop_left,
                         label.height + 2.0,
                         2.0,
                         Some(theme.background),
                         None,
                     );
+                    if let Some(number) = number {
+                        let badge_w = number.height + 8.0;
+                        let badge_cx =
+                            badge_left.expect("badge_left set with number") + badge_w * 0.5;
+                        scene.ellipse(
+                            badge_cx,
+                            *cursor_y + label.height * 0.5,
+                            badge_w * 0.5,
+                            badge_w * 0.5,
+                            Some(theme.accent),
+                            None,
+                        );
+                        scene.text(
+                            number.shaped.clone(),
+                            badge_cx - number.width * 0.5,
+                            *cursor_y + (label.height - number.height) * 0.5,
+                            theme.background,
+                        );
+                    }
                     scene.text(label.shaped.clone(), text_x, *cursor_y, theme.text);
                     let y = *cursor_y + label.height + 12.0;
                     let direction = if x2 >= x1 { 1.0 } else { -1.0 };
@@ -727,7 +799,7 @@ fn draw_items(
                         xs,
                         cursor_y,
                         theme,
-                        autonumber,
+                        numbers,
                         message_no,
                     );
                     *cursor_y += 8.0;
@@ -791,5 +863,90 @@ mod tests {
         let built = build(src, &DiagramTheme::dark(), &mut engine).unwrap();
         let png = built.encode_png(&mut engine, 2.0).unwrap();
         assert_eq!(&png[1..4], b"PNG");
+    }
+
+    #[test]
+    fn autonumber_draws_one_badge_per_message() {
+        let with_numbers = "sequenceDiagram\nautonumber\nactor A\nactor B\nA->>B: one\nB-->>A: two\n";
+        let without = "sequenceDiagram\nactor A\nactor B\nA->>B: one\nB-->>A: two\n";
+        let mut engine = TextEngine::new(None, "en-US");
+        let numbered = build(with_numbers, &DiagramTheme::light(), &mut engine).unwrap();
+        let plain = build(without, &DiagramTheme::light(), &mut engine).unwrap();
+        let ellipses = |built: &BuiltDiagram| {
+            built
+                .scene
+                .items
+                .iter()
+                .filter(|item| matches!(item, crate::SceneItem::Ellipse { .. }))
+                .count()
+        };
+        // Two actor icons appear in both; autonumber adds one badge per message.
+        assert_eq!(ellipses(&plain), 2);
+        assert_eq!(ellipses(&numbered), 4);
+    }
+
+    #[test]
+    fn count_messages_reaches_into_fragments() {
+        let src = "sequenceDiagram\nA->>B: start\nalt ok\nA->>B: yes\nelse no\nB-->>A: error\nend\n";
+        let parsed = parse(src).unwrap();
+        let resolver_items = {
+            let mut engine = TextEngine::new(None, "en-US");
+            let mut factory = TextFactory::new(&mut engine);
+            let mut resolver = Resolver {
+                factory: &mut factory,
+                index: &parsed.index,
+            };
+            parsed
+                .items
+                .iter()
+                .map(|item| resolver.item(item))
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(count_messages(&resolver_items), 3);
+    }
+
+    #[test]
+    fn parses_the_sample_sequence_diagram() {
+        // The example document shipped in samples/mermaid-sequence.md.
+        let sample = include_str!("../../../samples/mermaid-sequence.md");
+        let start = sample
+            .find("```mermaid")
+            .expect("sample contains a mermaid block")
+            + "```mermaid".len();
+        let end = sample[start..].find("```").expect("block is closed") + start;
+        let source = &sample[start..end];
+        let parsed = parse(source).unwrap();
+        assert_eq!(parsed.participants.len(), 4);
+        assert_eq!(parsed.participants[0].label, "User");
+        assert_eq!(parsed.participants[1].label, "Frontend");
+        assert_eq!(parsed.participants[2].label, "Backend API");
+        assert_eq!(parsed.participants[3].label, "Database");
+        assert!(parsed.participants[0].kind == ParticipantKind::Actor);
+        assert!(parsed.autonumber);
+        // Five root messages plus the alt fragment.
+        assert_eq!(parsed.items.len(), 6);
+        let Some(RawItem::Fragment { kind, label, sections }) = parsed.items.last() else {
+            panic!("the alt fragment must be the last item");
+        };
+        assert_eq!(kind, "alt");
+        // `alt X` names the fragment box; `else Y` opens a labelled section.
+        assert_eq!(label, "Valid credentials");
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].0, None);
+        assert_eq!(sections[1].0.as_deref(), Some("Invalid credentials"));
+        assert_eq!(sections[0].1.len(), 2);
+        assert_eq!(sections[1].1.len(), 2);
+        // The whole sample renders with both themes.
+        let mut engine = TextEngine::new(None, "en-US");
+        assert!(build(source, &DiagramTheme::light(), &mut engine).is_ok());
+        assert!(build(source, &DiagramTheme::dark(), &mut engine).is_ok());
+    }
+
+    #[test]
+    fn unsupported_statements_fail_with_line_numbers() {
+        let src = "sequenceDiagram\nA->>B: hi\nmystery statement\n";
+        let error = parse(src).unwrap_err();
+        assert_eq!(error.line, Some(3));
     }
 }

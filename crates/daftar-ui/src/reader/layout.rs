@@ -1279,4 +1279,41 @@ mod tests {
             .any(|e| matches!(e.kind, ElementKind::Diagram { .. })));
         assert!(!cache.is_empty());
     }
+
+    #[test]
+    fn lays_out_sample_sequence_diagram_inline() {
+        // The shipped example (samples/mermaid-sequence.md) renders as a diagram
+        // between the surrounding paragraphs, not as a code block.
+        let sample = include_str!("../../../../samples/mermaid-sequence.md");
+        let doc = parse_markdown(sample);
+        let mut engine = TextEngine::new(None, "en-US");
+        let code = CodeHighlighter::new();
+        let mut cache = DiagramCache::new();
+        let layout = build_layout(
+            &mut engine,
+            &doc,
+            &config(),
+            900.0,
+            Path::new("/tmp"),
+            &code,
+            &mut cache,
+            &ReaderColors::placeholder(),
+        );
+        let diagram_index = layout
+            .elements
+            .iter()
+            .position(|e| matches!(e.kind, ElementKind::Diagram { error: None, .. }))
+            .expect("the sequence diagram must render without an error");
+        // A heading exists before the diagram and a paragraph after it: position preserved.
+        assert!(layout.elements[..diagram_index]
+            .iter()
+            .any(|e| matches!(e.kind, ElementKind::Heading { .. })));
+        assert!(layout.elements[diagram_index + 1..]
+            .iter()
+            .any(|e| matches!(e.kind, ElementKind::Paragraph { .. })));
+        // The successful build is cached so the raw source is not shown instead.
+        let entry = cache.values().next().expect("diagram cached");
+        assert!(entry.built.is_some());
+        assert!(entry.error.is_none());
+    }
 }
