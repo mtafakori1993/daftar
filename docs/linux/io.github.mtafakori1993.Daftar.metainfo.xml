@@ -42,6 +42,15 @@
   </keywords>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.1.8" date="2026-11-28">
+      <description>
+        <p>Adds an Open With dialog to the library context menu for opening a
+        document in a chosen external application, with safe argument passing
+        and visible launch errors. Fixes translation templates that leaked
+        format specs into the interface, including the reading progress shown
+        in the status bar.</p>
+      </description>
+    </release>
     <release version="0.1.7" date="2026-11-25">
       <description>
         <p>Redesigns the Library page with richer document rows (reading
