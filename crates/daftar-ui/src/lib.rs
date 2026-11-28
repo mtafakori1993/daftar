@@ -9,6 +9,7 @@ pub mod rtl;
 pub mod tasks;
 pub mod views;
 pub mod images;
+pub mod open_with;
 pub mod reader;
 pub mod shaped;
 pub mod theme;

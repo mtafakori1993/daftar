@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use daftar_core::archive::ImportOptions;
@@ -153,6 +154,14 @@ pub(crate) struct PasteMarkdownDialog {
     pub error: Option<String>,
 }
 
+pub(crate) struct OpenWithDialog {
+    pub(crate) doc_title: String,
+    pub(crate) file_path: PathBuf,
+    pub(crate) query: String,
+    pub(crate) custom: String,
+    pub(crate) apps: Vec<crate::open_with::AppEntry>,
+}
+
 pub struct FlashcardEditor {
     pub card: Flashcard,
     pub is_new: bool,
@@ -200,6 +209,8 @@ pub struct DaftarApp {
     pub(crate) prompt: Option<TextPrompt>,
     pub import_dialog: Option<ImportDialogState>,
     pub(crate) paste_markdown: Option<PasteMarkdownDialog>,
+    pub(crate) open_with: Option<OpenWithDialog>,
+    pub(crate) launch_failures: Arc<Mutex<Vec<String>>>,
     pub flashcard_editor: Option<FlashcardEditor>,
     pub(crate) dark: bool,
     pub(crate) logo: Option<egui::TextureHandle>,
@@ -306,6 +317,8 @@ impl DaftarApp {
             prompt: None,
             import_dialog: None,
             paste_markdown: None,
+            open_with: None,
+            launch_failures: Arc::new(Mutex::new(Vec::new())),
             flashcard_editor: None,
             dark,
             logo: app_logo(ctx),
@@ -1461,6 +1474,7 @@ impl DaftarApp {
         self.show_prompt(ctx, &palette);
         self.show_import_dialog(ctx, &palette);
         self.show_paste_markdown_dialog(ctx, &palette);
+        self.show_open_with_dialog(ctx, &palette);
         self.show_flashcard_editor(ctx, &palette);
         if let Some(picker) = &mut self.picker {
             if let Some(result) = picker.show(ctx, &mut self.engine, &palette) {
@@ -1751,6 +1765,210 @@ impl DaftarApp {
         }
     }
 
+    /// Resolve a document's file path and open the "Open With" application chooser.
+    pub(crate) fn begin_open_with(&mut self, doc_id: &str) {
+        let Some(doc) = self.docs.iter().find(|d| d.id == doc_id).cloned() else {
+            self.toast(crate::i18n::t("Document not found."), ToastKind::Error);
+            return;
+        };
+        let Some(library) = &self.library else {
+            return;
+        };
+        let file_path = Path::new(&library.root_path).join(&doc.rel_path);
+        if !file_path.exists() {
+            self.toast(
+                crate::i18n::tf(
+                    "File is missing on disk: {}",
+                    &[&file_path.display().to_string()],
+                ),
+                ToastKind::Error,
+            );
+            return;
+        }
+        let apps = crate::open_with::discover();
+        self.open_with = Some(OpenWithDialog {
+            doc_title: doc.title.clone(),
+            file_path,
+            query: String::new(),
+            custom: String::new(),
+            apps,
+        });
+    }
+
+    /// Launch an application for `file`, reporting failures through toasts; asynchronous
+    /// non-zero exits are queued on `launch_failures` and surfaced on the next frame.
+    fn launch_with_app(
+        &mut self,
+        entry: crate::open_with::AppEntry,
+        file: &Path,
+        doc_title: &str,
+        ctx: &egui::Context,
+    ) {
+        match crate::open_with::launch(&entry, file) {
+            Ok(mut child) => {
+                let opened = crate::i18n::tf("Opened {} with {}", &[doc_title, &entry.name]);
+                self.status = opened.clone();
+                self.toast(opened, ToastKind::Success);
+                let failures = Arc::clone(&self.launch_failures);
+                let failure_message = crate::i18n::tf(
+                    "Could not open {} with {}: {}",
+                    &[
+                        doc_title,
+                        &entry.name,
+                        &"the application exited with an error".to_string(),
+                    ],
+                );
+                let repaint = ctx.clone();
+                std::thread::spawn(move || match child.wait() {
+                    Ok(status) if status.success() => {}
+                    Ok(status) => {
+                        failures
+                            .lock()
+                            .map(|mut queue| {
+                                queue.push(format!("{failure_message} ({status})"));
+                            })
+                            .ok();
+                        repaint.request_repaint();
+                    }
+                    Err(_) => {}
+                });
+            }
+            Err(error) => {
+                self.toast(
+                    crate::i18n::tf(
+                        "Could not open {} with {}: {}",
+                        &[doc_title, &entry.name, &error],
+                    ),
+                    ToastKind::Error,
+                );
+            }
+        }
+    }
+
+    fn show_open_with_dialog(&mut self, ctx: &egui::Context, palette: &Palette) {
+        let Some(dialog) = self.open_with.as_mut() else {
+            return;
+        };
+        let mut picked: Option<crate::open_with::AppEntry> = None;
+        let mut custom_submitted = false;
+        let mut cancel = false;
+        let mut open = true;
+        egui::Window::new(crate::i18n::t("Open With…"))
+            .collapsible(false)
+            .resizable(false)
+            .default_width(440.0)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.direction(|ui| {
+                    ui.set_max_width(440.0);
+                    ui.label(RichText::new(&dialog.doc_title).size(13.5).strong());
+                    ui.label(
+                        RichText::new(dialog.file_path.display().to_string())
+                            .size(11.0)
+                            .color(palette.text_secondary),
+                    );
+                    ui.add_space(6.0);
+                    widgets::search_field(
+                        ui,
+                        palette,
+                        &mut dialog.query,
+                        "Search applications…",
+                    );
+                    ui.add_space(4.0);
+                    let query = dialog.query.trim().to_lowercase();
+                    let mut shown = 0;
+                    egui::ScrollArea::vertical()
+                        .id_salt("open-with-apps")
+                        .max_height(240.0)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            for app in &dialog.apps {
+                                if !query.is_empty()
+                                    && !app.name.to_lowercase().contains(&query)
+                                {
+                                    continue;
+                                }
+                                shown += 1;
+                                if ui
+                                    .selectable_label(false, RichText::new(&app.name).size(12.5))
+                                    .clicked()
+                                {
+                                    picked = Some(app.clone());
+                                }
+                            }
+                            if shown == 0 {
+                                ui.label(
+                                    RichText::new(crate::i18n::t("No applications found."))
+                                        .size(12.0)
+                                        .color(palette.text_secondary),
+                                );
+                            }
+                        });
+                    ui.separator();
+                    ui.label(
+                        RichText::new(crate::i18n::t("Custom command"))
+                            .size(11.5)
+                            .color(palette.text_secondary),
+                    );
+                    let response = widgets::text_field(
+                        ui,
+                        palette,
+                        &mut dialog.custom,
+                        "Application path or command…",
+                        0.0,
+                    );
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                        custom_submitted = true;
+                    }
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.add_enabled_ui(!dialog.custom.trim().is_empty(), |ui| {
+                            if widgets::button(
+                                ui,
+                                palette,
+                                "Open",
+                                Some(Icon::FileText),
+                                ButtonVariant::Primary,
+                            )
+                            .clicked()
+                            {
+                                custom_submitted = true;
+                            }
+                        });
+                        if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet)
+                            .clicked()
+                        {
+                            cancel = true;
+                        }
+                    });
+                });
+            });
+
+        if let Some(entry) = picked.or_else(|| {
+            let custom = if custom_submitted {
+                self.open_with.as_ref().map(|d| d.custom.clone())
+            } else {
+                None
+            };
+            custom.and_then(|custom| {
+                let trimmed = custom.trim();
+                let program = trimmed.split_whitespace().next().unwrap_or_default();
+                (!program.is_empty()).then_some(crate::open_with::AppEntry {
+                    name: program.to_string(),
+                    exec: trimmed.to_string(),
+                    workdir: None,
+                })
+            })
+        }) {
+            if let Some(dialog) = self.open_with.take() {
+                self.launch_with_app(entry, &dialog.file_path, &dialog.doc_title, ctx);
+            }
+        } else if cancel || !open {
+            self.open_with = None;
+        }
+    }
+
     fn show_flashcard_editor(&mut self, ctx: &egui::Context, palette: &Palette) {
         let Some(editor) = self.flashcard_editor.as_mut() else { return };
         let mut save = false;
@@ -1840,6 +2058,14 @@ impl eframe::App for DaftarApp {
         self.resolve_dark(&ctx);
         self.poll_jobs(&ctx);
         self.poll_watcher(&ctx);
+        let launch_failures: Vec<String> = self
+            .launch_failures
+            .lock()
+            .map(|mut queue| queue.drain(..).collect())
+            .unwrap_or_default();
+        for message in launch_failures {
+            self.toast(message, ToastKind::Error);
+        }
         self.handle_shortcuts(ui);
         let palette = Palette::new(self.dark);
         let mut reader_actions = Vec::new();

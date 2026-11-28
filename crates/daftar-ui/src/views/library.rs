@@ -452,6 +452,10 @@ impl DaftarApp {
                             self.open_document(&doc.id);
                             ui.close();
                         }
+                        if ui.button(crate::i18n::t("Open With…")).clicked() {
+                            self.begin_open_with(&doc.id);
+                            ui.close();
+                        }
                         if ui.button(crate::i18n::t("Rename")).clicked() {
                             self.prompt = Some(crate::app::TextPrompt {
                                 title: crate::i18n::t("Rename document").into(),
