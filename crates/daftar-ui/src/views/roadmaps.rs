@@ -366,17 +366,21 @@ impl DaftarApp {
         let mut cancel = false;
         let mut add_ref = false;
         let mut delete_ref: Option<String> = None;
+        let screen = ctx.content_rect().size();
         egui::Window::new(if editor.is_new { "New roadmap item" } else { "Edit roadmap item" })
             .collapsible(false)
             .resizable(true)
             .default_width(480.0)
+            .min_size([420.0, 300.0])
+            .max_size(widgets::modal_max_size(screen))
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.direction(|ui| {
                     ui.label(crate::i18n::t("Title"));
                     widgets::text_field(ui, palette, &mut editor.node.title, "Title", 420.0);
                     ui.label(crate::i18n::t("Notes"));
-                    ui.add(egui::TextEdit::multiline(&mut editor.node.notes).desired_rows(3).desired_width(420.0));
+                    // Bounded so a long note cannot push the actions off-screen.
+                    widgets::bounded_text_editor(ui, &mut editor.node.notes, 3, 140.0, "", false);
                     ui.horizontal(|ui| {
                         ui.label(crate::i18n::t("Kind"));
                         egui::ComboBox::from_id_salt("node-kind").selected_text(editor.node.kind.label()).show_ui(ui, |ui| {

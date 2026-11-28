@@ -1690,41 +1690,63 @@ impl DaftarApp {
         let mut open = true;
         let mut save = false;
         let mut cancel = false;
+        let screen = ctx.content_rect().size();
         egui::Window::new(crate::i18n::t("Import Markdown text"))
             .collapsible(false)
             .resizable(true)
-            .default_size([640.0, 500.0])
+            .default_size([640.0, 520.0])
+            .min_size([420.0, 300.0])
+            .max_size(widgets::modal_max_size(screen))
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .open(&mut open)
             .show(ctx, |ui| {
                 ui.direction(|ui| {
+                    // Fixed header: labels and the document title field.
                     ui.label(crate::i18n::t("Document title (optional)"));
                     ui.add(egui::TextEdit::singleline(&mut dialog.title).desired_width(ui.available_width()));
                     ui.label(crate::i18n::t(
                         "A Markdown heading sets the document title; this value names the file.",
                     ));
-                    ui.add_space(6.0);
                     ui.label(crate::i18n::t("Markdown content"));
-                    ui.add(
-                        egui::TextEdit::multiline(&mut dialog.markdown)
-                            .desired_width(ui.available_width())
-                            .desired_rows(18)
-                            .hint_text(crate::i18n::t("Paste Markdown content here…")),
-                    );
-                    if let Some(error) = &dialog.error {
-                        ui.colored_label(palette.danger, error);
-                    }
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.add_enabled_ui(!dialog.markdown.trim().is_empty(), |ui| {
-                            if widgets::button(ui, palette, "Add to library", Some(Icon::Import), ButtonVariant::Primary).clicked() {
-                                save = true;
-                            }
+                    // Fixed footer: errors and actions never scroll away.
+                    egui::Panel::bottom("paste-markdown-footer")
+                        .frame(egui::Frame::NONE)
+                        .resizable(false)
+                        .show(ui, |ui| {
+                            ui.direction(|ui| {
+                                if let Some(error) = &dialog.error {
+                                    ui.colored_label(palette.danger, error);
+                                }
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    ui.add_enabled_ui(!dialog.markdown.trim().is_empty(), |ui| {
+                                        if widgets::button(ui, palette, "Add to library", Some(Icon::Import), ButtonVariant::Primary).clicked() {
+                                            save = true;
+                                        }
+                                    });
+                                    if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
+                                        cancel = true;
+                                    }
+                                });
+                            });
                         });
-                        if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
-                            cancel = true;
-                        }
-                    });
+                    // Flexible content: independently scrollable, bounded to the
+                    // remaining window space so pasted text cannot push the
+                    // window past the viewport.
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ui, |ui| {
+                            ui.direction(|ui| {
+                                widgets::bounded_text_editor(
+                                    ui,
+                                    &mut dialog.markdown,
+                                    12,
+                                    ui.available_height(),
+                                    "Paste Markdown content here…",
+                                    false,
+                                );
+                            });
+                        });
                 });
             });
 
@@ -1973,60 +1995,65 @@ impl DaftarApp {
         let Some(editor) = self.flashcard_editor.as_mut() else { return };
         let mut save = false;
         let mut cancel = false;
+        let screen = ctx.content_rect().size();
         egui::Window::new(if editor.is_new { "Create flashcard" } else { "Edit flashcard" })
             .collapsible(false)
             .resizable(true)
             .default_width(480.0)
+            .min_size([420.0, 300.0])
+            .max_size(widgets::modal_max_size(screen))
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.direction(|ui| {
-                    ui.label(RichText::new(crate::i18n::t("Front")).size(11.5).color(palette.text_secondary));
-                    ui.add(
-                        egui::TextEdit::multiline(&mut editor.card.front)
-                            .desired_rows(3)
-                            .desired_width(440.0),
-                    );
-                    ui.add_space(4.0);
-                    ui.label(RichText::new(crate::i18n::t("Back")).size(11.5).color(palette.text_secondary));
-                    ui.add(
-                        egui::TextEdit::multiline(&mut editor.card.back)
-                            .desired_rows(3)
-                            .desired_width(440.0),
-                    );
-                    ui.add_space(4.0);
-                    ui.label(RichText::new(crate::i18n::t("Explanation (optional)")).size(11.5).color(palette.text_secondary));
-                    ui.add(
-                        egui::TextEdit::multiline(&mut editor.card.explanation)
-                            .desired_rows(2)
-                            .desired_width(440.0),
-                    );
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.label(crate::i18n::t("Tags"));
-                        let mut tags = editor.card.tags.join(", ");
-                        if widgets::text_field(ui, palette, &mut tags, crate::i18n::t("comma separated"), 320.0).changed() {
-                            editor.card.tags = tags
-                                .split(',')
-                                .map(|s| s.trim().to_string())
-                                .filter(|s| !s.is_empty())
-                                .collect();
-                        }
-                    });
-                    if let Some(source) = &editor.source_title {
-                        ui.label(RichText::new(crate::i18n::tf("Source · {}", &[&source])).size(10.5).color(palette.text_secondary));
-                    }
-                    if let Some(error) = &editor.error {
-                        ui.colored_label(palette.danger, error);
-                    }
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        if widgets::button(ui, palette, "Save card", Some(Icon::Check), ButtonVariant::Primary).clicked() {
-                            save = true;
-                        }
-                        if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
-                            cancel = true;
-                        }
-                    });
+                    // Fixed footer: tags, errors and actions never scroll away.
+                    egui::Panel::bottom("flashcard-editor-footer")
+                        .frame(egui::Frame::NONE)
+                        .resizable(false)
+                        .show(ui, |ui| {
+                            ui.direction(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(crate::i18n::t("Tags"));
+                                    let mut tags = editor.card.tags.join(", ");
+                                    if widgets::text_field(ui, palette, &mut tags, crate::i18n::t("comma separated"), 320.0).changed() {
+                                        editor.card.tags = tags
+                                            .split(',')
+                                            .map(|s| s.trim().to_string())
+                                            .filter(|s| !s.is_empty())
+                                            .collect();
+                                    }
+                                });
+                                if let Some(source) = &editor.source_title {
+                                    ui.label(RichText::new(crate::i18n::tf("Source · {}", &[&source])).size(10.5).color(palette.text_secondary));
+                                }
+                                if let Some(error) = &editor.error {
+                                    ui.colored_label(palette.danger, error);
+                                }
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    if widgets::button(ui, palette, "Save card", Some(Icon::Check), ButtonVariant::Primary).clicked() {
+                                        save = true;
+                                    }
+                                    if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
+                                        cancel = true;
+                                    }
+                                });
+                            });
+                        });
+                    // Flexible content: card fields scroll independently of the footer.
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ui, |ui| {
+                            ui.direction(|ui| {
+                                ui.label(RichText::new(crate::i18n::t("Front")).size(11.5).color(palette.text_secondary));
+                                widgets::bounded_text_editor(ui, &mut editor.card.front, 3, (ui.available_height() * 0.34).max(64.0), "", false);
+                                ui.add_space(4.0);
+                                ui.label(RichText::new(crate::i18n::t("Back")).size(11.5).color(palette.text_secondary));
+                                widgets::bounded_text_editor(ui, &mut editor.card.back, 3, (ui.available_height() * 0.34).max(64.0), "", false);
+                                ui.add_space(4.0);
+                                ui.label(RichText::new(crate::i18n::t("Explanation (optional)")).size(11.5).color(palette.text_secondary));
+                                widgets::bounded_text_editor(ui, &mut editor.card.explanation, 2, ui.available_height().max(48.0), "", false);
+                            });
+                        });
                 });
             });
         if save {

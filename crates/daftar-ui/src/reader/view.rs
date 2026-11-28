@@ -1626,6 +1626,7 @@ impl ReaderState {
         let mut close = false;
         let mut save = false;
         let editing = dialog.highlight_id.is_some();
+        let screen = ctx.content_rect().size();
         egui::Window::new(if editing {
             crate::i18n::t("Edit note")
         } else {
@@ -1634,38 +1635,56 @@ impl ReaderState {
             .collapsible(false)
             .resizable(true)
             .default_width(420.0)
+            .min_size([360.0, 220.0])
+            .max_size(widgets::modal_max_size(screen))
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.direction(|ui| {
-                    ui.label(
-                        RichText::new(crate::i18n::t("A highlight with your note will be saved at this selection."))
-                            .size(12.0)
-                            .color(palette.text_secondary),
-                    );
-                    ui.add_space(6.0);
-                    ui.add(
-                        egui::TextEdit::multiline(&mut dialog.text)
-                            .desired_rows(4)
-                            .desired_width(380.0)
-                            .hint_text(crate::i18n::t("Your note…")),
-                    );
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        if widgets::button(
-                            ui,
-                            palette,
-                            "Save note",
-                            Some(Icon::Check),
-                            ButtonVariant::Primary,
-                        )
-                        .clicked()
-                        {
-                            save = true;
-                        }
-                        if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
-                            close = true;
-                        }
-                    });
+                    // Fixed footer: actions never scroll away.
+                    egui::Panel::bottom("note-dialog-footer")
+                        .frame(egui::Frame::NONE)
+                        .resizable(false)
+                        .show(ui, |ui| {
+                            ui.direction(|ui| {
+                                ui.horizontal(|ui| {
+                                    if widgets::button(
+                                        ui,
+                                        palette,
+                                        "Save note",
+                                        Some(Icon::Check),
+                                        ButtonVariant::Primary,
+                                    )
+                                    .clicked()
+                                    {
+                                        save = true;
+                                    }
+                                    if widgets::button(ui, palette, "Cancel", None, ButtonVariant::Quiet).clicked() {
+                                        close = true;
+                                    }
+                                });
+                            });
+                        });
+                    // Flexible content: long notes scroll inside the editor.
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ui, |ui| {
+                            ui.direction(|ui| {
+                                ui.label(
+                                    RichText::new(crate::i18n::t("A highlight with your note will be saved at this selection."))
+                                        .size(12.0)
+                                        .color(palette.text_secondary),
+                                );
+                                ui.add_space(6.0);
+                                widgets::bounded_text_editor(
+                                    ui,
+                                    &mut dialog.text,
+                                    4,
+                                    ui.available_height(),
+                                    "Your note…",
+                                    false,
+                                );
+                            });
+                        });
                 });
             });
         if save {
@@ -2071,47 +2090,65 @@ impl ReaderState {
         };
         let mut close = false;
         let mut copied: Option<String> = None;
+        let screen = ctx.content_rect().size();
         egui::Window::new(crate::i18n::t("Diagram source"))
             .collapsible(false)
             .resizable(true)
             .default_width(560.0)
             .default_height(420.0)
+            .min_size([380.0, 240.0])
+            .max_size(widgets::modal_max_size(screen))
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.direction(|ui| {
-                    ui.label(
-                        RichText::new(&dialog.title)
-                            .size(12.0)
-                            .color(palette.text_secondary),
-                    );
-                    ui.add_space(4.0);
-                    let mut buffer = dialog.source.clone();
-                    ui.add(
-                        egui::TextEdit::multiline(&mut buffer)
-                            .interactive(false)
-                            .code_editor()
-                            .desired_width(ui.available_width())
-                            .desired_rows(16),
-                    );
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        if widgets::button(
-                            ui,
-                            palette,
-                            "Copy code",
-                            Some(Icon::Copy),
-                            ButtonVariant::Secondary,
-                        )
-                        .clicked()
-                        {
-                            copied = Some(dialog.source.clone());
-                        }
-                        if widgets::button(ui, palette, "Close", Some(Icon::Close), ButtonVariant::Quiet)
-                            .clicked()
-                        {
-                            close = true;
-                        }
-                    });
+                    // Fixed footer: copy and close stay reachable for any source size.
+                    egui::Panel::bottom("diagram-source-footer")
+                        .frame(egui::Frame::NONE)
+                        .resizable(false)
+                        .show(ui, |ui| {
+                            ui.direction(|ui| {
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    if widgets::button(
+                                        ui,
+                                        palette,
+                                        "Copy code",
+                                        Some(Icon::Copy),
+                                        ButtonVariant::Secondary,
+                                    )
+                                    .clicked()
+                                    {
+                                        copied = Some(dialog.source.clone());
+                                    }
+                                    if widgets::button(ui, palette, "Close", Some(Icon::Close), ButtonVariant::Quiet)
+                                        .clicked()
+                                    {
+                                        close = true;
+                                    }
+                                });
+                            });
+                        });
+                    // Flexible content: long Mermaid sources scroll independently.
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ui, |ui| {
+                            ui.direction(|ui| {
+                                ui.label(
+                                    RichText::new(&dialog.title)
+                                        .size(12.0)
+                                        .color(palette.text_secondary),
+                                );
+                                let mut buffer = dialog.source.clone();
+                                widgets::bounded_text_editor(
+                                    ui,
+                                    &mut buffer,
+                                    12,
+                                    ui.available_height(),
+                                    "",
+                                    true,
+                                );
+                            });
+                        });
                 });
             });
         if let Some(source) = copied {

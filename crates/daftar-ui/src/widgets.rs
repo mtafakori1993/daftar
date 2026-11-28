@@ -571,3 +571,170 @@ pub fn centered_text(ui: &mut Ui, palette: &Palette, text: &str) {
         ui.label(RichText::new(text).color(palette.text_secondary));
     });
 }
+/// A multiline editor that never grows past `max_height`: long or pasted content
+/// scrolls inside the editor area instead of expanding the surrounding dialog,
+/// so footer buttons stay visible regardless of content length.
+pub fn bounded_text_editor(
+    ui: &mut Ui,
+    value: &mut String,
+    min_rows: usize,
+    max_height: f32,
+    hint_text: &str,
+    code_styling: bool,
+) -> Response {
+    let hint_text = crate::i18n::t(hint_text);
+    let max_height = max_height.max(80.0);
+    let output = egui::ScrollArea::vertical()
+        .id_salt(("bounded-editor", value.as_ptr() as usize))
+        .auto_shrink([false, true])
+        .max_height(max_height)
+        .show(ui, |ui| {
+            let editor = TextEdit::multiline(value)
+                .desired_width(ui.available_width())
+                .desired_rows(min_rows)
+                .hint_text(hint_text);
+            ui.add(if code_styling {
+                editor.code_editor()
+            } else {
+                editor
+            })
+        });
+    // The viewport rect is the visible, bounded area; the inner TextEdit response
+    // would report the full content height.
+    ui.allocate_rect(output.inner_rect, Sense::hover())
+}
+
+/// The largest a modal may grow: 90% of the current viewport, keeping the window
+/// centred and fully visible on any screen size, zoom level or resize.
+pub fn modal_max_size(screen: Vec2) -> Vec2 {
+    vec2(
+        (screen.x * 0.9).max(420.0),
+        (screen.y * 0.9).max(280.0),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_editor_caps_height_with_long_content() {
+        let mut text = "row\n".repeat(2000);
+        let mut top = 0.0;
+        let mut bottom = 0.0;
+        egui::__run_test_ui(|ui| {
+            top = ui.cursor().top();
+            let response = bounded_text_editor(ui, &mut text, 4, 200.0, "", false);
+            bottom = response.rect.bottom();
+        });
+        assert!(
+            bottom - top <= 202.0,
+            "editor grew to {}px, max is 200px",
+            bottom - top
+        );
+    }
+
+    #[test]
+    fn bounded_editor_viewport_never_exceeds_max_for_short_content() {
+        let mut text = "short".to_string();
+        let mut top = 0.0;
+        let mut bottom = 0.0;
+        egui::__run_test_ui(|ui| {
+            top = ui.cursor().top();
+            let response = bounded_text_editor(ui, &mut text, 4, 200.0, "", false);
+            bottom = response.rect.bottom();
+        });
+        assert!(bottom - top <= 202.0, "viewport exceeded the 200px cap, got {}px", bottom - top);
+    }
+
+    #[test]
+    fn modal_max_size_is_ninety_percent_of_the_viewport() {
+        assert_eq!(modal_max_size(vec2(1000.0, 800.0)), vec2(900.0, 720.0));
+        let floored = modal_max_size(vec2(300.0, 200.0));
+        assert_eq!(floored, vec2(420.0, 280.0));
+    }
+}
+
+#[cfg(test)]
+mod modal_layout_tests {
+    use super::*;
+    use crate::rtl::DirUi;
+
+    /// Drive the app's exact paste-dialog structure headlessly for several frames
+    /// and verify the modal never escapes the viewport, even with 10,000 lines.
+    #[test]
+    fn paste_modal_stays_inside_viewport_with_10k_lines() {
+        let ctx = egui::Context::default();
+        let screen = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(900.0, 500.0));
+        let mut text = "line of pasted content\n".repeat(10_000);
+        let mut window_rect = egui::Rect::NOTHING;
+        let mut footer_bottom = f32::MIN;
+        for _ in 0..5 {
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            };
+            ctx.begin_pass(input);
+            egui::Window::new("Import Markdown text")
+                .collapsible(false)
+                .resizable(true)
+                .default_size([640.0, 520.0])
+                .min_size([420.0, 300.0])
+                .max_size(modal_max_size(screen.size()))
+                .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+                .show(&ctx, |ui| {
+                    ui.direction(|ui| {
+                        ui.label("Markdown content");
+                        egui::Panel::bottom("test-footer")
+                            .frame(egui::Frame::NONE)
+                            .resizable(false)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let save =
+                                        button(ui, &Palette::new(false), "Add to library", None, ButtonVariant::Primary);
+                                    footer_bottom = save.rect.bottom();
+                                    let _ = button(ui, &Palette::new(false), "Cancel", None, ButtonVariant::Quiet);
+                                });
+                            });
+                        });
+                    let response = egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ui, |ui| {
+                            bounded_text_editor(
+                                ui,
+                                &mut text,
+                                12,
+                                ui.available_height(),
+                                "Paste Markdown content here…",
+                                false,
+                            );
+                        });
+                    window_rect = response.response.rect;
+                });
+            ctx.end_pass()
+                .drop_without_applying_deltas();
+        }
+        assert!(window_rect != egui::Rect::NOTHING, "window rendered");
+        let max = modal_max_size(screen.size());
+        assert!(
+            window_rect.height() <= max.y + 2.0,
+            "window height {} exceeds the {}px viewport cap",
+            window_rect.height(),
+            max.y
+        );
+        assert!(
+            window_rect.top() >= screen.top() - 2.0 && window_rect.bottom() <= screen.bottom() + 2.0,
+            "window [{}, {}] escapes the screen [{}..{}]",
+            window_rect.top(),
+            window_rect.bottom(),
+            screen.top(),
+            screen.bottom()
+        );
+        assert!(
+            footer_bottom <= screen.bottom() + 2.0,
+            "footer buttons fell off-screen: bottom {} > {}",
+            footer_bottom,
+            screen.bottom()
+        );
+    }
+}
